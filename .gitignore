@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Go build/test outputs
+/bin/
+/dist/
+/agent
+/agent.exe
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Local runtime/config
+agent.config.json
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/

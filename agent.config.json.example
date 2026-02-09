@@ -1,0 +1,65 @@
+{
+  "provider": {
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "qwen-plus",
+    "models": ["qwen-plus", "qwen-max", "qwen-turbo"],
+    "timeout_ms": 120000
+  },
+  "runtime": {
+    "workspace_root": ".",
+    "max_steps": 128,
+    "context_token_limit": 24000
+  },
+  "safety": {
+    "command_timeout_ms": 120000,
+    "output_limit_bytes": 1048576
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "threshold": 0.8,
+    "recent_messages": 12
+  },
+  "workflow": {
+    "require_todo_for_complex": true,
+    "auto_verify_after_edit": true,
+    "max_verify_attempts": 2,
+    "verify_commands": []
+  },
+  "permission": {
+    "*": "ask",
+    "read": "allow",
+    "list": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "write": "ask",
+    "patch": "ask",
+    "todoread": "allow",
+    "todowrite": "allow",
+    "skill": "ask",
+    "task": "ask",
+    "bash": {
+      "*": "ask",
+      "ls *": "allow",
+      "cat *": "allow",
+      "grep *": "allow",
+      "go test *": "allow",
+      "pytest*": "allow",
+      "npm test*": "allow"
+    },
+    "external_directory": "deny"
+  },
+  "agents": {
+    "default": "build",
+    "definitions": []
+  },
+  "skills": {
+    "paths": ["./.skills", "~/.coder/skills"]
+  },
+  "storage": {
+    "base_dir": "~/.coder",
+    "log_max_mb": 20,
+    "cache_ttl_hours": 168
+  },
+  "instructions": []
+}
