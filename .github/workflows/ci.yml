@@ -33,5 +33,50 @@ jobs:
       - name: Test
         run: go test ./...
 
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          # Linux ARM64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          # macOS Intel (x86)
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          # macOS Apple Silicon (M1/M2/M3)
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Build
-        run: go build ./cmd/agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          out="coder-${{ matrix.goos }}-${{ matrix.goarch }}"
+          [ "${{ matrix.goos }}" = "windows" ] && out="${out}.exe"
+          go build -o "$out" ./cmd/agent
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: coder-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: coder-${{ matrix.goos }}-${{ matrix.goarch }}*
