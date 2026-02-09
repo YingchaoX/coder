@@ -167,17 +167,11 @@ func parseStreamResponse(body io.Reader, onTextChunk TextChunkFunc) (Response, e
 		var event openAIStreamEvent
 		data := []byte(payload)
 		if err := json.Unmarshal(data, &event); err != nil {
-			// 流式 SSE 中某行可能被截断，缺根对象闭合 }，补全后重试
-			errStr := err.Error()
-			if len(data) > 0 &&
-				(strings.Contains(errStr, "unexpected end of JSON input") ||
-					strings.Contains(errStr, "after object key:value pair")) {
-				data = append(data, '}')
-				if retryErr := json.Unmarshal(data, &event); retryErr != nil {
-					return fmt.Errorf("parse stream event: %w (retry: %v)", err, retryErr)
-				}
-			} else {
-				return fmt.Errorf("parse stream event: %w", err)
+			// 流式 SSE 中某行可能被截断，结构不完整；尝试修复后重试
+			// Streaming SSE lines may be truncated; attempt structural repair
+			repaired := repairJSON(data)
+			if retryErr := json.Unmarshal(repaired, &event); retryErr != nil {
+				return fmt.Errorf("parse stream event: %w (repair: %v)", err, retryErr)
 			}
 		}
 
@@ -466,4 +460,98 @@ func extractText(v any) string {
 		}
 	}
 	return ""
+}
+
+// repairJSON 尝试修复结构不完整的 JSON（如流式截断导致的括号不匹配）。
+// repairJSON attempts to fix structurally broken JSON by inserting missing
+// closing braces/brackets. It scans the input byte-by-byte while respecting
+// JSON string boundaries, and when a closing token (']' or '}') mismatches
+// the current nesting context it inserts the expected closer first.
+// A cap on total insertions prevents infinite loops on pathological input.
+func repairJSON(data []byte) []byte {
+	out := make([]byte, 0, len(data)+16)
+	stack := make([]byte, 0, 32)
+	const maxInsertions = 32
+	insertions := 0
+	i := 0
+
+	for i < len(data) {
+		ch := data[i]
+
+		// 跳过 JSON 字符串内容（正确处理转义）
+		// Skip over JSON string content (handle escapes properly)
+		if ch == '"' {
+			out = append(out, ch)
+			i++
+			for i < len(data) {
+				c := data[i]
+				out = append(out, c)
+				i++
+				if c == '\\' && i < len(data) {
+					out = append(out, data[i])
+					i++
+				} else if c == '"' {
+					break
+				}
+			}
+			continue
+		}
+
+		// 开括号入栈 / Push opening brackets
+		if ch == '{' || ch == '[' {
+			stack = append(stack, ch)
+			out = append(out, ch)
+			i++
+			continue
+		}
+
+		// 遇到 '}' 但栈顶是 '['：插入 ']' 先闭合数组
+		// Got '}' but top of stack is '[': insert ']' to close array first
+		if ch == '}' {
+			if len(stack) > 0 && stack[len(stack)-1] == '[' && insertions < maxInsertions {
+				out = append(out, ']')
+				stack = stack[:len(stack)-1]
+				insertions++
+				continue // 不推进 i，重新处理当前 '}'
+			}
+			if len(stack) > 0 && stack[len(stack)-1] == '{' {
+				stack = stack[:len(stack)-1]
+			}
+			out = append(out, ch)
+			i++
+			continue
+		}
+
+		// 遇到 ']' 但栈顶是 '{'：插入 '}' 先闭合对象
+		// Got ']' but top of stack is '{': insert '}' to close object first
+		if ch == ']' {
+			if len(stack) > 0 && stack[len(stack)-1] == '{' && insertions < maxInsertions {
+				out = append(out, '}')
+				stack = stack[:len(stack)-1]
+				insertions++
+				continue // 不推进 i，重新处理当前 ']'
+			}
+			if len(stack) > 0 && stack[len(stack)-1] == '[' {
+				stack = stack[:len(stack)-1]
+			}
+			out = append(out, ch)
+			i++
+			continue
+		}
+
+		out = append(out, ch)
+		i++
+	}
+
+	// 追加剩余未闭合的括号 / Append closers for remaining open brackets
+	for j := len(stack) - 1; j >= 0 && insertions < maxInsertions; j-- {
+		if stack[j] == '{' {
+			out = append(out, '}')
+		} else {
+			out = append(out, ']')
+		}
+		insertions++
+	}
+
+	return out
 }
