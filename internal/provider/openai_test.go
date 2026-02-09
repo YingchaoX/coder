@@ -129,6 +129,89 @@ func TestParseNonStreamResponseEmitsChunk(t *testing.T) {
 	}
 }
 
+func TestRepairJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "valid json unchanged",
+			input: `{"a":1,"b":[2,3]}`,
+			want:  `{"a":1,"b":[2,3]}`,
+		},
+		{
+			name:  "missing closing brace before array end",
+			input: `{"choices":[{"delta":{"k":"v"}}]}`,
+			// 已经平衡，不需要修复 / Already balanced, no repair needed
+			want: `{"choices":[{"delta":{"k":"v"}}]}`,
+		},
+		{
+			name:  "object missing close before ]",
+			input: `[{"a":1]`,
+			// 栈顶是 '{' 遇到 ']'，先插入 '}'
+			want: `[{"a":1}]`,
+		},
+		{
+			name:  "truncated stream event like test case",
+			input: `{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"DME.md\u0022}"}}]}]}`,
+			// choice 对象缺少闭合 }，修复后在 ] 前插入 }
+			want: `{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"DME.md\u0022}"}}]}}]}`,
+		},
+		{
+			name:  "truncated at end missing braces",
+			input: `{"a":{"b":1`,
+			want:  `{"a":{"b":1}}`,
+		},
+		{
+			name:  "truncated at end missing bracket",
+			input: `[1,2,3`,
+			want:  `[1,2,3]`,
+		},
+		{
+			name:  "string containing braces not affected",
+			input: `{"key":"{[}]"}`,
+			want:  `{"key":"{[}]"}`,
+		},
+		{
+			name:  "string with escaped quotes",
+			input: `{"key":"val\"ue"}`,
+			want:  `{"key":"val\"ue"}`,
+		},
+		{
+			name:  "array missing close before }",
+			input: `{"a":[1,2}`,
+			want:  `{"a":[1,2]}`,
+		},
+		{
+			name:  "empty input",
+			input: ``,
+			want:  ``,
+		},
+		{
+			name:  "multiple missing closers",
+			input: `{"a":[{"b":[{"c":1`,
+			want:  `{"a":[{"b":[{"c":1}]}]}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(repairJSON([]byte(tc.input)))
+			if got != tc.want {
+				t.Fatalf("repairJSON mismatch:\n  input=%s\n  got  =%s\n  want =%s", tc.input, got, tc.want)
+			}
+			// 修复后的 JSON 应能被成功解析 / Repaired JSON should be parseable
+			var dummy any
+			if tc.want != "" {
+				if err := json.Unmarshal([]byte(got), &dummy); err != nil {
+					t.Fatalf("repaired JSON still invalid: %v\n  json=%s", err, got)
+				}
+			}
+		})
+	}
+}
+
 func TestClientModelSwitch(t *testing.T) {
 	c := NewClient(config.ProviderConfig{
 		BaseURL:   "http://127.0.0.1:8000/v1",
