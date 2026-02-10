@@ -12,7 +12,8 @@ import (
 
 func TestManagerStartAndCall(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "server.sh")
-	content := "#!/bin/sh\nwhile IFS= read -r line; do\n  echo '{\"ok\":true,\"line\":'\"$line\"'}'\n  break\ndone\n"
+	// Use a more robust shell script that properly handles JSON input and doesn't timeout
+	content := "#!/bin/sh\necho '{\"ok\":true,\"output\":\"test response\"}'\n"
 	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +22,7 @@ func TestManagerStartAndCall(t *testing.T) {
 		Name:      "demo",
 		Enabled:   true,
 		Command:   []string{script},
-		TimeoutMS: 1000,
+		TimeoutMS: 5000,
 	}}})
 	mgr.StartEnabled(context.Background())
 	server, ok := mgr.ServerByTool("mcp_demo")

@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"coder/internal/i18n"
+	"coder/internal/orchestrator"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -67,6 +69,18 @@ type SessionInfoMsg struct {
 	Model string
 }
 
+// SendInputMsg 表示有新的用户输入需要发送给 orchestrator
+// SendInputMsg carries a new user input to be processed by the orchestrator
+type SendInputMsg struct {
+	Text string
+}
+
+// TurnErrorMsg 表示一次对话回合出错
+// TurnErrorMsg indicates an error from a turn
+type TurnErrorMsg struct {
+	Err error
+}
+
 // App Bubble Tea 主 Model
 // App is the main Bubble Tea model
 type App struct {
@@ -93,26 +107,29 @@ type App struct {
 	tokenPct   float64
 	todoItems  []string
 
-	// 内容缓冲 / Content buffers
-	chatContent strings.Builder
-	logContent  strings.Builder
-	fileContent strings.Builder
+	// 内容缓冲（使用指针避免 strings.Builder 被复制） / Content buffers (use pointers to avoid copying strings.Builder)
+	chatContent *strings.Builder
+	logContent  *strings.Builder
+	fileContent *strings.Builder
 
 	// 状态 / State
-	streaming    bool
-	streamBuffer strings.Builder
-	lastError    string
-	workspace    string
+	streaming       bool
+	streamBuffer    *strings.Builder
+	lastError       string
+	workspace       string
+	hadStreamChunks bool
 
 	// 配置 / Config
 	theme  Theme
 	keys   KeyMap
 	locale *i18n.I18n
+	// 编排器 / Orchestrator
+	orch *orchestrator.Orchestrator
 }
 
 // NewApp 创建 TUI 应用
 // NewApp creates a new TUI application
-func NewApp(workspace, agent, model, sessionID string) App {
+func NewApp(workspace, agent, model, sessionID string, orch *orchestrator.Orchestrator) App {
 	ta := textarea.New()
 	ta.Placeholder = i18n.T("input.placeholder")
 	ta.CharLimit = 8192
@@ -133,6 +150,12 @@ func NewApp(workspace, agent, model, sessionID string) App {
 		theme:        theme,
 		keys:         DefaultKeyMap(),
 		locale:       i18n.Global(),
+		orch:         orch,
+
+		chatContent:  &strings.Builder{},
+		logContent:   &strings.Builder{},
+		fileContent:  &strings.Builder{},
+		streamBuffer: &strings.Builder{},
 	}
 }
 
@@ -157,6 +180,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.appendLog("⚠ Generation interrupted")
 			}
 			return a, nil
+		case "enter":
+			// Enter 发送消息，Shift+Enter 由 textarea 处理换行
+			if a.inputFocused {
+				text := strings.TrimSpace(a.input.Value())
+				if text != "" {
+					cmds = append(cmds, a.handleSendInput(text))
+				}
+				return a, tea.Batch(cmds...)
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -167,6 +199,10 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TextChunkMsg:
 		a.streaming = true
+		a.hadStreamChunks = true
+		if a.streamBuffer == nil {
+			a.streamBuffer = &strings.Builder{}
+		}
 		a.streamBuffer.WriteString(msg.Text)
 		a.updateChatFromStream()
 		return a, nil
@@ -182,8 +218,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case ToolDoneMsg:
-		a.appendChat(fmt.Sprintf("  ✓ %s", msg.Summary))
-		a.appendLog(fmt.Sprintf("[DONE] %s: %s", msg.Name, msg.Summary))
+		a.appendToolDone(msg.Name, msg.Summary)
 		return a, nil
 
 	case TurnDoneMsg:
@@ -191,15 +226,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			a.lastError = msg.Err.Error()
 			a.appendChat("\n❌ " + msg.Err.Error())
-		} else if a.streamBuffer.Len() > 0 {
-			// 流式内容已经在 chat 中，这里刷新最终版本
-			a.flushStreamToChat()
+		} else {
+			// 如果这一轮没有收到任何流式 chunk，则把最终内容一次性追加到聊天面板。
+			// For non-streaming responses (no chunks received), append the final content once.
+			if !a.hadStreamChunks && strings.TrimSpace(msg.Content) != "" {
+				a.appendAssistantMarkdown(msg.Content)
+			} else if a.hadStreamChunks {
+				// 流式内容已经在 chat 中，这里把缓冲刷入正式内容。
+				// Streaming content already displayed; merge buffer into persistent chat.
+				a.flushStreamToChat()
+			}
 		}
-		a.streamBuffer.Reset()
+		a.hadStreamChunks = false
+		if a.streamBuffer != nil {
+			a.streamBuffer.Reset()
+		}
 		return a, nil
 
 	case StreamingStartMsg:
 		a.streaming = true
+		if a.streamBuffer == nil {
+			a.streamBuffer = &strings.Builder{}
+		}
 		a.streamBuffer.Reset()
 		return a, nil
 
@@ -213,6 +261,12 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.sessionID = msg.ID
 		a.agentName = msg.Agent
 		a.modelName = msg.Model
+		return a, nil
+	case TurnErrorMsg:
+		if msg.Err != nil {
+			a.lastError = msg.Err.Error()
+			a.appendChat("\n❌ " + msg.Err.Error())
+		}
 		return a, nil
 	}
 
@@ -287,44 +341,174 @@ func (a *App) relayout() {
 	}
 
 	a.chatView = viewport.New(mainWidth, panelHeight)
-	a.chatView.SetContent(a.chatContent.String())
+	if a.chatContent != nil {
+		a.chatView.SetContent(a.chatContent.String())
+	}
 
 	a.filesView = viewport.New(mainWidth, panelHeight)
-	a.filesView.SetContent(a.fileContent.String())
+	if a.fileContent != nil {
+		a.filesView.SetContent(a.fileContent.String())
+	}
 
 	a.logsView = viewport.New(mainWidth, panelHeight)
-	a.logsView.SetContent(a.logContent.String())
+	if a.logContent != nil {
+		a.logsView.SetContent(a.logContent.String())
+	}
 
 	a.input.SetWidth(mainWidth - 4)
 }
 
 func (a *App) appendChat(text string) {
+	if a.chatContent == nil {
+		a.chatContent = &strings.Builder{}
+	}
 	a.chatContent.WriteString(text + "\n")
 	a.chatView.SetContent(a.chatContent.String())
 	a.chatView.GotoBottom()
 }
 
 func (a *App) appendLog(text string) {
+	if a.logContent == nil {
+		a.logContent = &strings.Builder{}
+	}
 	a.logContent.WriteString(text + "\n")
 	a.logsView.SetContent(a.logContent.String())
 }
 
 func (a *App) updateChatFromStream() {
 	// 在流式输出时，显示已有内容 + 流式缓冲
-	content := a.chatContent.String()
-	if a.streamBuffer.Len() > 0 {
-		content += "\n" + a.streamBuffer.String()
+	base := ""
+	if a.chatContent != nil {
+		base = a.chatContent.String()
+	}
+	content := base
+	if a.streamBuffer != nil && a.streamBuffer.Len() > 0 {
+		content += a.streamBuffer.String()
 	}
 	a.chatView.SetContent(content)
 	a.chatView.GotoBottom()
 }
 
 func (a *App) flushStreamToChat() {
-	if a.streamBuffer.Len() > 0 {
-		a.chatContent.WriteString("\n" + a.streamBuffer.String() + "\n")
-		a.chatView.SetContent(a.chatContent.String())
-		a.chatView.GotoBottom()
+	if a.streamBuffer != nil && a.streamBuffer.Len() > 0 {
+		a.appendAssistantMarkdown(a.streamBuffer.String())
 	}
+}
+
+// appendToolDone 以结构化方式展示工具结果（尤其是 write 的 diff）
+// appendToolDone renders tool completion in a structured way (with pretty diffs for write).
+func (a *App) appendToolDone(name, summary string) {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return
+	}
+
+	// 将首行视作总览，其余视作详细信息（通常是 diff）
+	head, detail := splitHeadAndDetail(summary)
+
+	a.appendChat(fmt.Sprintf("  ✓ %s", head))
+	a.appendLog(fmt.Sprintf("[DONE] %s: %s", name, head))
+
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return
+	}
+
+	// 如果看起来像 unified diff，则用专门的 diff 渲染；否则当作普通多行文本缩进展示。
+	if looksLikeDiff(detail) {
+		rendered := RenderDiff(detail, a.theme)
+		a.appendChat(indentBlock(rendered, "    "))
+		a.appendLog(indentBlock(rendered, "    "))
+	} else {
+		a.appendChat(indentBlock(detail, "    "))
+		a.appendLog(indentBlock(detail, "    "))
+	}
+}
+
+// splitHeadAndDetail 将多行文本拆成首行和剩余部分。
+// splitHeadAndDetail splits multi-line summary into head (first line) and detail (rest).
+func splitHeadAndDetail(s string) (string, string) {
+	normalized := strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	parts := strings.SplitN(normalized, "\n", 2)
+	head := strings.TrimSpace(parts[0])
+	if len(parts) == 1 {
+		return head, ""
+	}
+	return head, strings.TrimRight(parts[1], "\n")
+}
+
+// looksLikeDiff 粗略判断文本是否是 unified diff。
+// looksLikeDiff makes a cheap guess whether the text is a unified diff.
+func looksLikeDiff(s string) bool {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	nonEmpty := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		nonEmpty++
+		if strings.HasPrefix(line, "--- ") ||
+			strings.HasPrefix(line, "+++ ") ||
+			strings.HasPrefix(line, "@@ ") ||
+			strings.HasPrefix(line, "diff --") {
+			return true
+		}
+		if nonEmpty >= 20 {
+			// 太长了，不再精细判断
+			break
+		}
+	}
+	return false
+}
+
+// indentBlock 为多行文本统一添加缩进前缀。
+// indentBlock adds a prefix to each line in a multi-line block.
+func indentBlock(s, prefix string) string {
+	if strings.TrimSpace(s) == "" {
+		return s
+	}
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if line == "" {
+			lines[i] = prefix
+		} else {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// appendAssistantMarkdown 以 markdown 方式渲染助手回复（支持 `code` / ```code``` 块）
+// appendAssistantMarkdown renders assistant replies as markdown (inline `code` and ```blocks```).
+func (a *App) appendAssistantMarkdown(text string) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return
+	}
+
+	width := a.chatView.Width
+	if width <= 0 {
+		width = a.width
+	}
+
+	rendered := RenderMarkdown(trimmed, width)
+
+	if a.chatContent == nil {
+		a.chatContent = &strings.Builder{}
+	}
+	// 与其他消息之间留一空行，提升可读性。
+	if a.chatContent.Len() > 0 && !strings.HasSuffix(a.chatContent.String(), "\n\n") {
+		a.chatContent.WriteString("\n")
+	}
+
+	a.chatContent.WriteString(rendered)
+	a.chatContent.WriteString("\n")
+	a.chatView.SetContent(a.chatContent.String())
+	a.chatView.GotoBottom()
 }
 
 // --- 渲染方法 / Render methods ---
@@ -361,13 +545,13 @@ func (a App) renderActivePanel(width, height int) string {
 	case PanelChat:
 		content = a.chatView.View()
 	case PanelFiles:
-		if a.fileContent.Len() == 0 {
+		if a.fileContent == nil || a.fileContent.Len() == 0 {
 			content = a.theme.MutedStyle.Render("  No files accessed yet")
 		} else {
 			content = a.filesView.View()
 		}
 	case PanelLogs:
-		if a.logContent.Len() == 0 {
+		if a.logContent == nil || a.logContent.Len() == 0 {
 			content = a.theme.MutedStyle.Render("  No logs yet")
 		} else {
 			content = a.logsView.View()
@@ -478,9 +662,55 @@ func (a *App) SetTodoItems(items []string) {
 
 // Run 启动 Bubble Tea TUI
 // Run starts the Bubble Tea TUI application
-func Run(workspace, agent, model, sessionID string) error {
-	app := NewApp(workspace, agent, model, sessionID)
+func Run(app App) error {
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+
+	// 将 orchestrator 的回调绑定到 TUI（文本流 + 工具事件）
+	if app.orch != nil {
+		app.orch.SetTextStreamCallback(func(chunk string) {
+			if strings.TrimSpace(chunk) == "" {
+				return
+			}
+			p.Send(TextChunkMsg{Text: chunk})
+		})
+		app.orch.SetToolEventCallback(func(name, summary string, done bool) {
+			if done {
+				p.Send(ToolDoneMsg{Name: name, Summary: summary})
+			} else {
+				p.Send(ToolStartMsg{Name: name, Summary: summary})
+			}
+		})
+	}
+
 	_, err := p.Run()
 	return err
+}
+
+// handleSendInput 处理发送消息：追加用户消息并启动一次对话回合
+// handleSendInput appends the user message and starts a new turn with the orchestrator
+func (a *App) handleSendInput(text string) tea.Cmd {
+	if a.orch == nil {
+		return nil
+	}
+	a.AppendUserMessage(text)
+	a.input.SetValue("")
+	return a.runTurnCmd(text)
+}
+
+// runTurnCmd 在后台调用 orchestrator.RunInput，并以消息形式把结果回传给 TUI
+// runTurnCmd runs orchestrator.RunInput in background and returns final result as messages
+func (a App) runTurnCmd(text string) tea.Cmd {
+	if a.orch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		ctx := context.Background()
+		// 在 TUI 中我们依赖 orchestrator 的文本回调做真正的流式渲染，
+		// 这里将 out 设为 nil，只拿最终文本结果用于非流式场景。
+		content, err := a.orch.RunInput(ctx, text, nil)
+		if err != nil {
+			return TurnDoneMsg{Content: content, Err: err}
+		}
+		return TurnDoneMsg{Content: content, Err: nil}
+	}
 }

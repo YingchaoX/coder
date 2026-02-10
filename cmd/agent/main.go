@@ -20,8 +20,6 @@ import (
 	"coder/internal/storage"
 	"coder/internal/tools"
 	"coder/internal/tui"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -141,11 +139,19 @@ func main() {
 	}
 	registry := tools.NewRegistry(toolList...)
 
+	// 简单审批回调：当前版本下统一自动允许策略为 ask 的操作（危险命令仍由 Policy 拒绝）
+	// Simple approval callback: auto-allow operations marked as "ask" by policy; dangerous ones are still denied by Policy.
+	approveFn := func(ctx context.Context, req tools.ApprovalRequest) (bool, error) {
+		_ = ctx
+		_ = req
+		return true, nil
+	}
+
 	// 构建 orchestrator / Build orchestrator
 	orch := orchestrator.New(providerClient, registry, orchestrator.Options{
 		MaxSteps:          cfg.Runtime.MaxSteps,
 		SystemPrompt:      defaultSystemPrompt,
-		OnApproval:        nil, // TUI 将设置审批回调 / TUI will set approval callback
+		OnApproval:        approveFn,
 		Policy:            policy,
 		Assembler:         assembler,
 		Compaction:        cfg.Compaction,
@@ -159,26 +165,9 @@ func main() {
 		return orch.RunSubtask(ctx, agentName, prompt)
 	})
 
-	// 启动 Bubble Tea TUI / Launch Bubble Tea TUI
-	app := tui.NewApp(ws.Root(), activeProfile.Name, cfg.Provider.Model, sessionMeta.ID)
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
-
-	// 将 orchestrator 相关信息注入 TUI（通过 Msg）
-	// 注意: 完整的交互集成需要 TUI 内部调用 orch.RunInput
-	// Note: full interaction integration requires TUI to call orch.RunInput internally
-	go func() {
-		p.Send(tui.SessionInfoMsg{
-			ID:    sessionMeta.ID,
-			Agent: activeProfile.Name,
-			Model: cfg.Provider.Model,
-		})
-	}()
-
-	// 保存 session 时的闭包 / Session save closure
-	_ = orch  // orchestrator 将由 TUI 事件驱动调用 / orchestrator called by TUI events
-	_ = store // store 将在退出时保存 / store saves on exit
-
-	if _, err := p.Run(); err != nil {
+	// 启动 Bubble Tea TUI，并将 orchestrator 注入 / Launch Bubble Tea TUI with orchestrator
+	app := tui.NewApp(ws.Root(), activeProfile.Name, cfg.Provider.Model, sessionMeta.ID, orch)
+	if err := tui.Run(app); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		os.Exit(1)
 	}

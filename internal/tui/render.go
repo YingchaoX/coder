@@ -17,7 +17,11 @@ func RenderMarkdown(content string, width int) string {
 	}
 
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		// 注意：不要使用 WithAutoStyle，它会通过 OSC 11 询问终端背景色，
+		// 在 Bubble Tea TUI 中会把终端的响应当成输入事件，导致出现
+		// `]11;rgb:...` 这样的“乱码”。
+		// Use a fixed dark style to avoid OSC background probes that leak into input.
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {

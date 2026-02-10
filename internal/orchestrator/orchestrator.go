@@ -24,6 +24,12 @@ import (
 // TextChunkFunc is the text streaming callback (v2: driven by Provider StreamCallbacks)
 type TextChunkFunc = func(chunk string)
 
+// ToolEventFunc 工具执行事件回调（用于 TUI 等前端）
+// ToolEventFunc is the tool execution event callback (for TUI frontends)
+// done=false 表示工具开始，done=true 表示工具结束。
+// done=false means tool start, done=true means tool finished.
+type ToolEventFunc = func(name, summary string, done bool)
+
 type ApprovalFunc func(ctx context.Context, req tools.ApprovalRequest) (bool, error)
 
 const (
@@ -62,6 +68,8 @@ type Orchestrator struct {
 	registry          *tools.Registry
 	maxSteps          int
 	onApproval        ApprovalFunc
+	onTextChunk       TextChunkFunc
+	onToolEvent       ToolEventFunc
 	messages          []chat.Message
 	policy            *permission.Policy
 	assembler         *contextmgr.Assembler
@@ -167,6 +175,18 @@ func (o *Orchestrator) CurrentModel() string {
 	return o.provider.CurrentModel()
 }
 
+// SetTextStreamCallback 配置文本流式回调（用于 TUI 等前端）
+// SetTextStreamCallback configures a text streaming callback (for TUI frontends)
+func (o *Orchestrator) SetTextStreamCallback(fn TextChunkFunc) {
+	o.onTextChunk = fn
+}
+
+// SetToolEventCallback 配置工具事件回调（用于 TUI 等前端）
+// SetToolEventCallback configures a tool event callback (for TUI frontends)
+func (o *Orchestrator) SetToolEventCallback(fn ToolEventFunc) {
+	o.onToolEvent = fn
+}
+
 func (o *Orchestrator) SetModel(model string) error {
 	if o.provider == nil {
 		return fmt.Errorf("provider unavailable")
@@ -227,7 +247,13 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				}
 				streamed = true
 				streamRenderer.Append(chunk)
+				if o.onTextChunk != nil {
+					o.onTextChunk(chunk)
+				}
 			}
+		} else if o.onTextChunk != nil {
+			// 无 CLI 输出时，仅向外派发原始 chunk
+			onTextChunk = o.onTextChunk
 		}
 
 		resp, err := o.chatWithRetry(ctx, o.buildProviderMessages(), o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled), onTextChunk)
@@ -275,8 +301,12 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 		}
 
 		for _, call := range resp.ToolCalls {
+			startSummary := formatToolStart(call.Function.Name, call.Function.Arguments)
 			if out != nil {
-				renderToolStart(out, formatToolStart(call.Function.Name, call.Function.Arguments))
+				renderToolStart(out, startSummary)
+			}
+			if o.onToolEvent != nil {
+				o.onToolEvent(call.Function.Name, startSummary, false)
 			}
 			if !o.isToolAllowed(call.Function.Name) {
 				reason := fmt.Sprintf("tool %s disabled by active agent %s", call.Function.Name, o.activeAgent.Name)
@@ -328,8 +358,12 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				o.appendToolError(call, err)
 				continue
 			}
+			resultSummary := summarizeToolResult(call.Function.Name, result)
 			if out != nil {
-				renderToolResult(out, summarizeToolResult(call.Function.Name, result))
+				renderToolResult(out, resultSummary)
+			}
+			if o.onToolEvent != nil {
+				o.onToolEvent(call.Function.Name, resultSummary, true)
 			}
 			o.messages = append(o.messages, chat.Message{
 				Role:       "tool",
