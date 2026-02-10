@@ -7,6 +7,7 @@ toolchain go1.24.13
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/pkoukk/tiktoken-go v0.1.8
+	github.com/sashabaranov/go-openai v1.41.2
 	modernc.org/sqlite v1.45.0
 )
 
