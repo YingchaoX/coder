@@ -31,15 +31,15 @@ var EnMessages = map[string]string{
 	"keys.ctrl_p": "ctrl+p commands",
 
 	// Approval
-	"approval.title":           "Approval Required",
-	"approval.tool":            "Tool: %s",
-	"approval.reason":          "Reason: %s",
-	"approval.allow":           "Allow",
-	"approval.deny":            "Deny",
-	"approval.danger":          "⚠ DANGEROUS COMMAND",
-	"approval.prompt":          "Allow this action? [y/N]",
-	"approval.allow_all":       "Allow all (non-dangerous)",
-	"approval.denied":          "Denied by user",
+	"approval.title":            "Approval Required",
+	"approval.tool":             "Tool: %s",
+	"approval.reason":           "Reason: %s",
+	"approval.allow":            "Allow",
+	"approval.deny":             "Deny",
+	"approval.danger":           "⚠ DANGEROUS COMMAND",
+	"approval.prompt":           "Allow this action? [y/N]",
+	"approval.allow_all":        "Allow all (non-dangerous)",
+	"approval.denied":           "Denied by user",
 	"approval.callback_missing": "Approval callback unavailable",
 
 	// Commands
@@ -49,10 +49,10 @@ var EnMessages = map[string]string{
 	"cmd.exit":     "Exit application",
 
 	// Errors
-	"error.provider":    "Provider error: %s",
-	"error.tool":        "Tool error: %s",
-	"error.permission":  "Permission denied: %s",
-	"error.session":     "Session error: %s",
+	"error.provider":   "Provider error: %s",
+	"error.tool":       "Tool error: %s",
+	"error.permission": "Permission denied: %s",
+	"error.session":    "Session error: %s",
 
 	// Context
 	"context.tokens":    "Tokens: %d / %d (%.1f%%)",
@@ -67,12 +67,12 @@ var EnMessages = map[string]string{
 	"compact.fallback":   "Using heuristic summarization (LLM unavailable)",
 
 	// Session
-	"session.new":     "New session: %s",
-	"session.loaded":  "Loaded session: %s",
-	"session.forked":  "Forked session: %s",
+	"session.new":      "New session: %s",
+	"session.loaded":   "Loaded session: %s",
+	"session.forked":   "Forked session: %s",
 	"session.reverted": "Reverted to %d messages",
-	"session.saved":   "Session saved",
-	"session.none":    "No sessions found",
+	"session.saved":    "Session saved",
+	"session.none":     "No sessions found",
 
 	// Model
 	"model.current":  "Current model: %s",

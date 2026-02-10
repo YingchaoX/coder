@@ -23,8 +23,8 @@ type LLMSummarizer func(ctx context.Context, systemPrompt, userPrompt string) (s
 // LLMCompaction 使用 LLM 生成摘要的策略
 // LLMCompaction uses LLM to generate summaries
 type LLMCompaction struct {
-	summarize  LLMSummarizer
-	maxTokens  int
+	summarize LLMSummarizer
+	maxTokens int
 }
 
 // NewLLMCompaction 创建 LLM compaction 策略

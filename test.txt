@@ -1,5 +1,0 @@
-This is a test file created for demonstration purposes.
-It contains some sample text.
-
-Line 3: Hello, world!
-Line 4: Binary coding is fun!

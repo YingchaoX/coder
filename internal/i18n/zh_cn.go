@@ -32,15 +32,15 @@ var ZhCNMessages = map[string]string{
 	"keys.ctrl_p": "ctrl+p 命令",
 
 	// 审批
-	"approval.title":           "需要审批",
-	"approval.tool":            "工具: %s",
-	"approval.reason":          "原因: %s",
-	"approval.allow":           "允许",
-	"approval.deny":            "拒绝",
-	"approval.danger":          "⚠ 危险命令",
-	"approval.prompt":          "允许此操作? [y/N]",
-	"approval.allow_all":       "允许所有 (非危险)",
-	"approval.denied":          "已被用户拒绝",
+	"approval.title":            "需要审批",
+	"approval.tool":             "工具: %s",
+	"approval.reason":           "原因: %s",
+	"approval.allow":            "允许",
+	"approval.deny":             "拒绝",
+	"approval.danger":           "⚠ 危险命令",
+	"approval.prompt":           "允许此操作? [y/N]",
+	"approval.allow_all":        "允许所有 (非危险)",
+	"approval.denied":           "已被用户拒绝",
 	"approval.callback_missing": "审批回调不可用",
 
 	// 命令
@@ -68,12 +68,12 @@ var ZhCNMessages = map[string]string{
 	"compact.fallback":   "使用启发式摘要 (LLM 不可用)",
 
 	// 会话
-	"session.new":     "新会话: %s",
-	"session.loaded":  "已加载会话: %s",
-	"session.forked":  "已分叉会话: %s",
+	"session.new":      "新会话: %s",
+	"session.loaded":   "已加载会话: %s",
+	"session.forked":   "已分叉会话: %s",
 	"session.reverted": "已回退到 %d 条消息",
-	"session.saved":   "会话已保存",
-	"session.none":    "未找到会话",
+	"session.saved":    "会话已保存",
+	"session.none":     "未找到会话",
 
 	// 模型
 	"model.current":  "当前模型: %s",

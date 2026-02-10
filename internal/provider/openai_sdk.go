@@ -17,10 +17,10 @@ import (
 // OpenAIProvider 使用 go-openai SDK 的 Provider 实现
 // OpenAIProvider implements Provider using the go-openai SDK
 type OpenAIProvider struct {
-	client     *openai.Client
-	model      string
-	cfg        OpenAIConfig
-	mu         sync.RWMutex
+	client *openai.Client
+	model  string
+	cfg    OpenAIConfig
+	mu     sync.RWMutex
 }
 
 // OpenAIConfig SDK provider 配置

@@ -20,6 +20,10 @@ import (
 	"coder/internal/tools"
 )
 
+// TextChunkFunc 文本流式回调（v2: 由 Provider StreamCallbacks 驱动）
+// TextChunkFunc is the text streaming callback (v2: driven by Provider StreamCallbacks)
+type TextChunkFunc = func(chunk string)
+
 type ApprovalFunc func(ctx context.Context, req tools.ApprovalRequest) (bool, error)
 
 const (
@@ -54,7 +58,7 @@ type ContextStats struct {
 }
 
 type Orchestrator struct {
-	provider          *provider.Client
+	provider          provider.Provider
 	registry          *tools.Registry
 	maxSteps          int
 	onApproval        ApprovalFunc
@@ -68,9 +72,10 @@ type Orchestrator struct {
 	lastCompaction    string
 	workflow          config.WorkflowConfig
 	workspaceRoot     string
+	compStrategy      contextmgr.CompactionStrategy
 }
 
-func New(providerClient *provider.Client, registry *tools.Registry, opts Options) *Orchestrator {
+func New(providerClient provider.Provider, registry *tools.Registry, opts Options) *Orchestrator {
 	maxSteps := opts.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = 128
@@ -159,7 +164,7 @@ func (o *Orchestrator) CurrentModel() string {
 	if o.provider == nil {
 		return ""
 	}
-	return o.provider.Model()
+	return o.provider.CurrentModel()
 }
 
 func (o *Orchestrator) SetModel(model string) error {
@@ -170,7 +175,8 @@ func (o *Orchestrator) SetModel(model string) error {
 }
 
 func (o *Orchestrator) CompactNow() bool {
-	compacted, summary, changed := contextmgr.Compact(o.messages, o.compaction.RecentMessages, o.compaction.Prune)
+	compacted, summary, changed := contextmgr.CompactWithStrategy(
+		context.Background(), o.messages, o.compaction.RecentMessages, o.compaction.Prune, o.compStrategy)
 	if !changed {
 		return false
 	}
@@ -213,7 +219,7 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 		}
 		streamRenderer := newAnswerStreamRenderer(out)
 		streamed := false
-		onTextChunk := provider.TextChunkFunc(nil)
+		var onTextChunk TextChunkFunc
 		if out != nil {
 			onTextChunk = func(chunk string) {
 				if chunk == "" {
@@ -500,7 +506,8 @@ func (o *Orchestrator) maybeCompact() {
 	if estimated <= threshold {
 		return
 	}
-	compacted, summary, changed := contextmgr.Compact(o.messages, o.compaction.RecentMessages, o.compaction.Prune)
+	compacted, summary, changed := contextmgr.CompactWithStrategy(
+		context.Background(), o.messages, o.compaction.RecentMessages, o.compaction.Prune, o.compStrategy)
 	if !changed {
 		return
 	}
@@ -576,26 +583,30 @@ func (o *Orchestrator) chatWithRetry(
 	ctx context.Context,
 	messages []chat.Message,
 	definitions []chat.ToolDef,
-	onTextChunk provider.TextChunkFunc,
-) (provider.Response, error) {
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		resp, err := o.provider.Chat(ctx, messages, definitions, onTextChunk)
-		if err == nil {
-			return resp, nil
-		}
-		lastErr = err
-		if attempt == 2 {
-			break
-		}
-		backoff := time.Duration(150*(attempt+1)) * time.Millisecond
-		select {
-		case <-ctx.Done():
-			return provider.Response{}, ctx.Err()
-		case <-time.After(backoff):
+	onTextChunk TextChunkFunc,
+) (provider.ChatResponse, error) {
+	model := ""
+	if o.provider != nil {
+		model = o.provider.CurrentModel()
+	}
+	req := provider.ChatRequest{
+		Model:    model,
+		Messages: messages,
+		Tools:    definitions,
+	}
+	var cb *provider.StreamCallbacks
+	if onTextChunk != nil {
+		cb = &provider.StreamCallbacks{
+			OnTextChunk: onTextChunk,
 		}
 	}
-	return provider.Response{}, lastErr
+	// 重试逻辑现在由 Provider 内部处理
+	// Retry logic is now handled internally by the Provider
+	resp, err := o.provider.Chat(ctx, req, cb)
+	if err != nil {
+		return provider.ChatResponse{}, err
+	}
+	return resp, nil
 }
 
 func (o *Orchestrator) hasSessionTodos(ctx context.Context) (bool, error) {

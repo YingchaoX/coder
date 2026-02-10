@@ -3,24 +3,33 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"coder/internal/storage"
 )
 
 func TestTodoReadWrite(t *testing.T) {
-	mgr, err := storage.NewManager(t.TempDir())
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := storage.NewSQLiteStore(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	meta, _, err := mgr.CreateSession("build", "model", "/tmp", true, true)
-	if err != nil {
+	defer store.Close()
+
+	meta := storage.SessionMeta{
+		ID:    "sess_test_todo",
+		Agent: "build",
+		Model: "model",
+		CWD:   "/tmp",
+	}
+	if err := store.CreateSession(meta); err != nil {
 		t.Fatal(err)
 	}
 	getID := func() string { return meta.ID }
 
-	readTool := NewTodoReadTool(mgr, getID)
-	writeTool := NewTodoWriteTool(mgr, getID)
+	readTool := NewTodoReadTool(store, getID)
+	writeTool := NewTodoWriteTool(store, getID)
 
 	args, _ := json.Marshal(map[string]any{
 		"todos": []map[string]any{

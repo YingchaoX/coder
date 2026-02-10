@@ -81,7 +81,7 @@ type App struct {
 	logsView    viewport.Model
 
 	// 输入 / Input
-	input    textarea.Model
+	input        textarea.Model
 	inputFocused bool
 
 	// 侧边栏数据 / Sidebar data
@@ -94,9 +94,9 @@ type App struct {
 	todoItems  []string
 
 	// 内容缓冲 / Content buffers
-	chatContent  strings.Builder
-	logContent   strings.Builder
-	fileContent  strings.Builder
+	chatContent strings.Builder
+	logContent  strings.Builder
+	fileContent strings.Builder
 
 	// 状态 / State
 	streaming    bool
