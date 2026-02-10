@@ -26,50 +26,31 @@ make build
 # 或
 go build -o bin/agent ./cmd/agent
 
-# 启动（示例配置）
-./bin/agent -config agent.config.json.example
-
-# 指定工作区与语言
-./bin/agent -config agent.config.json.example -cwd /path/to/project -lang zh-CN
+# 启动
+./bin/agent
 ```
 
-**命令行参数**
+**配置文件发现顺序**
 
-| 参数 | 说明 |
+| 位置 | 说明 |
 |------|------|
-| `-config` | 配置文件路径（JSON/JSONC） |
-| `-cwd` | 工作区根目录，覆盖配置中的 `workspace_root` |
-| `-lang` | UI 语言：`en`、`zh-CN`，空则自动检测 |
+| `./.coder/config.json` | 当前路径配置（优先） |
+| `~/.coder/config.json` | 家目录配置（当前路径不存在时回退） |
 
 ---
 
 ## TUI 与操作
 
-- **布局**：聊天面板、文件面板、日志面板；侧边栏（会话、context 用量、agent、model）；底部状态栏。
-- **输入**：多行输入；`@path` 提及（工作区内路径）；`!<shell 命令>` 直接执行并记入会话。
-- **快捷键**（以实际代码为准）：`Tab` 切换面板、`Esc` 中断/返回、`Ctrl+P` 命令面板等。
+- **布局**：单主面板（对话/工具/日志时间线）；侧边栏（会话、context 用量、agent、model）；底部状态栏。
+- **输入**：多行输入；`@path` 提及（工作区内路径）；`!<shell 命令>` 与 `/<内建命令>` 特殊命令。
+- **快捷键**（以实际代码为准）：`Tab` 切换 `ask`/`edit(agent)` 模式，`Esc` 中断/返回。
 
-**命令（通过命令面板或输入）**
+**命令（通过输入）**
 
 | 命令 | 说明 |
 |------|------|
 | `/help` | 帮助 |
-| `/new` | 新会话 |
-| `/sessions` | 列出会话 |
-| `/use <id>` | 切换会话 |
-| `/fork <id>` | 从会话分叉 |
-| `/revert <n>` | 回滚最近 n 条消息 |
-| `/agent <name>` | 切换代理 |
-| `/models [model_id]` | 查看/切换模型 |
-| `/context` | 上下文长度（token 估算/限制/利用率） |
-| `/tools` | 可用工具 |
-| `/skills` | 技能列表 |
-| `/todo` | 待办（checklist 展示） |
-| `/summarize` | 生成会话摘要 |
-| `/compact` | 手动压缩上下文 |
-| `/config` | 当前配置 |
-| `/mcp` | MCP 状态 |
-| `/exit` | 退出 |
+| `/model [model_id]` | 查看/切换模型 |
 
 直接 Shell：输入以 `!` 开头，如 `! ls -la`，仍受危险命令审批策略约束。
 
@@ -77,7 +58,7 @@ go build -o bin/agent ./cmd/agent
 
 ## 配置
 
-参考 `agent.config.json.example`。支持 JSON/JSONC。
+配置文件使用 `./.coder/config.json`（项目）或 `~/.coder/config.json`（全局回退），仓库中的 `agent.config.json.example` 可作为字段参考。支持 JSON/JSONC。
 
 **主要配置块**
 
@@ -99,7 +80,6 @@ go build -o bin/agent ./cmd/agent
 
 | 变量 | 用途 |
 |------|------|
-| `AGENT_CONFIG_PATH` | 配置文件路径 |
 | `AGENT_BASE_URL` | 模型服务 base URL |
 | `AGENT_MODEL` | 默认模型 |
 | `AGENT_API_KEY` | API 密钥；未设时可退回到 `DASHSCOPE_API_KEY` |
@@ -131,5 +111,7 @@ make all           # lint + test + build
 
 ## 文档
 
-- `docs/requirements.md` — 产品需求（v1/v2）
-- `docs/USAGE.md` — 使用说明与示例
+- `docs/requirements.md` — 需求说明总索引（按功能点拆分）
+- `docs/design-v2.md` — 技术说明总索引（按模块拆分）
+- `docs/requirements/` — 需求分册（交互、工具、安全、Agent、配置、异常、限制）
+- `docs/technical/` — 技术分册（架构、编排、工具实现、权限、安全、存储、MCP、TUI、配置）

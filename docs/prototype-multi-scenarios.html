@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coder TUI 原型图（多场景）</title>
+  <style>
+    :root {
+      --bg: #0c1118;
+      --panel: #121a24;
+      --panel-2: #0f151d;
+      --line: #1f2a38;
+      --text: #d6deeb;
+      --muted: #92a0b5;
+      --accent: #4bb3fd;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #f87171;
+      --plan: #6aa6ff;
+      --default: #60d394;
+      --auto: #f4a261;
+      --yolo: #f94144;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background: radial-gradient(circle at top right, #142033 0%, var(--bg) 45%);
+      color: var(--text);
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    .page {
+      max-width: 1380px;
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+
+    .title {
+      display: grid;
+      gap: 8px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(120deg, rgba(75, 179, 253, 0.12), rgba(0, 0, 0, 0));
+    }
+
+    .title p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .scene-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .scene-nav button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .scene-nav button.active {
+      border-color: var(--accent);
+      color: #fff;
+      background: rgba(75, 179, 253, 0.2);
+    }
+
+    .scene {
+      display: none;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0));
+      overflow: hidden;
+    }
+
+    .scene.active { display: block; }
+
+    .scene-meta {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #0d141d;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .app {
+      min-height: 660px;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      background: var(--panel-2);
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      min-height: 0;
+    }
+
+    .timeline {
+      padding: 14px;
+      overflow-y: auto;
+      border-right: 1px solid var(--line);
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      max-height: 100%;
+    }
+
+    .msg {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+      line-height: 1.55;
+      background: var(--panel);
+    }
+
+    .msg.user { border-left: 3px solid #5ab1ff; }
+    .msg.assistant { border-left: 3px solid #22c55e; }
+    .msg.tool { border-left: 3px solid #f59e0b; }
+    .msg.system { border-left: 3px solid #a78bfa; }
+
+    .label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .tool-summary {
+      display: grid;
+      gap: 6px;
+      color: #c6d4e8;
+    }
+
+    .kv { color: var(--muted); font-size: 12px; }
+
+    details {
+      margin-top: 6px;
+      border-top: 1px dashed #273445;
+      padding-top: 6px;
+    }
+
+    summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 12px;
+    }
+
+    pre {
+      margin: 6px 0 0;
+      white-space: pre-wrap;
+      font-size: 12px;
+      color: #c2d1e4;
+    }
+
+    .diff {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .diff div {
+      border: 1px solid #2a394d;
+      border-radius: 8px;
+      padding: 8px;
+      background: #0e1620;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .plus { color: #7df0a5; }
+    .minus { color: #ff9f9f; }
+    .hint { color: var(--muted); }
+
+    .stream-cursor {
+      display: inline-block;
+      width: 8px;
+      background: var(--accent);
+      height: 1em;
+      margin-left: 3px;
+      vertical-align: text-bottom;
+      animation: blink 1s steps(1) infinite;
+    }
+
+    @keyframes blink {
+      0%, 40% { opacity: 1; }
+      41%, 100% { opacity: 0; }
+    }
+
+    .sidebar {
+      padding: 12px;
+      background: #0c131c;
+      display: grid;
+      grid-template-rows: repeat(5, min-content);
+      gap: 10px;
+      align-content: start;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #0f1822;
+      font-size: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .card-title {
+      color: #e7edf6;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .todo-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      border: 1px solid #243347;
+      background: #0c141e;
+      border-radius: 6px;
+      padding: 5px 6px;
+      font-size: 11px;
+    }
+
+    .status.done { color: var(--ok); }
+    .status.progress { color: var(--warn); }
+    .status.todo { color: #9fb3cc; }
+
+    .pill {
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 11px;
+      width: fit-content;
+    }
+
+    .pill.plan { border-color: var(--plan); color: var(--plan); }
+    .pill.default { border-color: var(--default); color: var(--default); }
+    .pill.auto-edit { border-color: var(--auto); color: var(--auto); }
+    .pill.yolo { border-color: var(--yolo); color: var(--yolo); }
+
+    .input {
+      border-top: 1px solid var(--line);
+      padding: 10px 12px;
+      background: #0c121a;
+      display: grid;
+      gap: 6px;
+    }
+
+    .inputbox {
+      min-height: 64px;
+      border: 1px solid #2a3a4e;
+      border-radius: 10px;
+      padding: 10px;
+      color: #d9e3f1;
+      background: #0b131d;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .input-line {
+      border: 1px solid #1e2a3a;
+      border-radius: 8px;
+      background: #091019;
+      color: var(--muted);
+      padding: 6px 10px;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+
+    @media (max-width: 980px) {
+      body { padding: 10px; }
+      .content { grid-template-columns: 1fr; }
+      .timeline { border-right: none; border-bottom: 1px solid var(--line); min-height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="title">
+      <h1>Coder 单文件原型（按最新需求）</h1>
+      <p>已调整为：无顶部状态条、右侧固定 5 模块（Context/Model/Todos/Tools/Skills）、输入框下方单行信息、主聊天区可上下滚动、thinking 可折叠。</p>
+    </div>
+
+    <div class="scene-nav">
+      <button class="active" data-target="scene-home">1. 进入主界面</button>
+      <button data-target="scene-stream">2. 流式输出</button>
+      <button data-target="scene-tool">3. Tool 调用</button>
+      <button data-target="scene-todo">4. Todo 处理</button>
+      <button data-target="scene-skill">5. Skill 使用</button>
+      <button data-target="scene-thinking">6. 模型 Thinking</button>
+    </div>
+
+    <section class="scene active" id="scene-home">
+      <div class="scene-meta">
+        <span>场景目标：进入主界面，固定布局</span>
+        <span>需求锚点：01/02</span>
+      </div>
+      <div class="app">
+        <div class="content">
+          <div class="timeline">
+            <div class="msg assistant">
+              <div class="label"><span>assistant</span><span>刚刚</span></div>
+              欢迎使用 Coder。直接输入需求，或使用 `!` 执行 shell、`/` 调用内建命令。
+            </div>
+            <div class="msg user">
+              <div class="label"><span>user</span><span>输入中</span></div>
+              帮我检查下当前仓库测试失败的原因。
+            </div>
+            <div class="msg system">
+              <div class="label"><span>system</span><span>scroll</span></div>
+              主聊天区支持纵向滚动，可回看历史对话与工具日志。
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="card">
+              <div class="card-title">Context</div>
+              <span>18.2k / 128k</span>
+              <span class="hint">compaction: standby</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Model</div>
+              <span class="pill default">mode: default</span>
+              <span>agent: build</span>
+              <span>model: qwen3-coder-plus</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Todos</div>
+              <div class="todo-item"><span>暂无 todo</span><span class="status todo">empty</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Tools</div>
+              <span>enabled: read/write/list/glob/grep/patch/bash</span>
+              <span>summary view: on</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Skills</div>
+              <span>semantic route: on</span>
+              <span>auto-trigger: allowed</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="input">
+          <div class="inputbox">帮我检查下当前仓库测试失败的原因。</div>
+          <div class="input-line">Enter 发送 · Shift+Enter 换行 · Tab 切换 mode · Esc 标记中断流式 · 当前: default/build/qwen3-coder-plus · cwd: /Users/xiongyingchao/Documents/Code/github/coder</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-stream">
+      <div class="scene-meta">
+        <span>场景目标：流式输出与 Esc 中断标记</span>
+        <span>需求锚点：01/02/07</span>
+      </div>
+      <div class="app">
+        <div class="content">
+          <div class="timeline">
+            <div class="msg user">
+              <div class="label"><span>user</span><span>t+0s</span></div>
+              帮我总结这个项目怎么启动，并列出关键命令。
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant (streaming)</span><span>t+2.6s</span></div>
+              这个项目是单二进制终端代理，启动后进入全屏 TUI。建议按顺序：
+              <br />1) 准备配置文件 `./.coder/config.json` 或 `~/.coder/config.json`
+              <br />2) 启动后先查看 `/help`
+              <br />3) 常用命令 `/model` `/permissions` `/review` `/undo`
+              <span class="stream-cursor"></span>
+            </div>
+
+            <div class="msg system">
+              <div class="label"><span>system</span><span>t+3.1s</span></div>
+              用户按下 Esc，UI 标记“中断流式显示”；已接收内容保留并可继续滚动查看历史。
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant</span><span>异常示意</span></div>
+              流式中断若已收到部分内容，则返回部分结果；若首包失败，则返回 provider 错误。
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="card">
+              <div class="card-title">Context</div>
+              <span>21.4k / 128k</span>
+              <span class="warn">streaming buffer: active</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Model</div>
+              <span class="pill default">mode: default</span>
+              <span>agent: build</span>
+              <span>model: qwen3-coder-plus</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Todos</div>
+              <div class="todo-item"><span>整理启动步骤</span><span class="status progress">in_progress</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Tools</div>
+              <span>tool loop: idle</span>
+              <span>latest: none</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Skills</div>
+              <span>semantic route: standby</span>
+              <span>loaded: none</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="input">
+          <div class="inputbox">（流式进行中，输入框可继续编辑下一条问题）</div>
+          <div class="input-line">Enter 发送 · Shift+Enter 换行 · Esc 标记中断流式 · turn_state=streaming · partial_result=kept · cwd: /Users/xiongyingchao/Documents/Code/github/coder</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-tool">
+      <div class="scene-meta">
+        <span>场景目标：tool 调用摘要 + payload 展开 + diff 对比</span>
+        <span>需求锚点：01/02/03/04</span>
+      </div>
+      <div class="app">
+        <div class="content">
+          <div class="timeline">
+            <div class="msg user">
+              <div class="label"><span>user</span><span>t+0s</span></div>
+              修复 login handler 的空指针问题并补测试。
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool start</span><span>read</span></div>
+              <div class="tool-summary">
+                <span>摘要：读取 `internal/http/login.go`</span>
+                <span class="kv">耗时 38ms · result ok</span>
+              </div>
+              <details>
+                <summary>展开完整 payload</summary>
+                <pre>{"path":"internal/http/login.go"}</pre>
+              </details>
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool done</span><span>patch</span></div>
+              <div class="tool-summary">
+                <span>摘要：应用 1 个文件，1 个 hunk</span>
+                <span class="kv">operation=updated · 耗时 96ms</span>
+              </div>
+              <details open>
+                <summary>展开 diff（左右并排）</summary>
+                <div class="diff">
+                  <div>
+                    @@ func Login(...)<br />
+                    <span class="minus">- if req.User.ID == "" {</span><br />
+                    <span class="minus">-   return err</span><br />
+                    }
+                  </div>
+                  <div>
+                    @@ func Login(...)<br />
+                    <span class="plus">+ if req == nil || req.User == nil {</span><br />
+                    <span class="plus">+   return errors.New("invalid request")</span><br />
+                    }
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool done</span><span>bash</span></div>
+              <div class="tool-summary">
+                <span>摘要：执行 `go test ./...`</span>
+                <span class="kv">exit_code=0 · 耗时 12.4s</span>
+              </div>
+              <details>
+                <summary>展开 stdout/stderr（超长输出可截断）</summary>
+                <pre>ok  internal/http  0.82s
+ok  internal/auth  1.22s
+... [output truncated]</pre>
+              </details>
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant</span><span>完成</span></div>
+              已完成修复并通过验证：共修改 1 个文件，新增 1 组 nil-check 测试。
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="card">
+              <div class="card-title">Context</div>
+              <span>28.9k / 128k</span>
+              <span class="ok">compaction: not required</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Model</div>
+              <span class="pill auto-edit">mode: auto-edit</span>
+              <span>agent: build</span>
+              <span>model: qwen3-coder-plus</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Todos</div>
+              <div class="todo-item"><span>定位 bug</span><span class="status done">done</span></div>
+              <div class="todo-item"><span>修复并测试</span><span class="status done">done</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Tools</div>
+              <span>current: bash</span>
+              <span>approval: ask -> approved once</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Skills</div>
+              <span>semantic route: on</span>
+              <span>used this turn: none</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="input">
+          <div class="inputbox">继续把这次修复拆分为两个 commit 建议。</div>
+          <div class="input-line">Enter 发送 · Shift+Enter 换行 · 当前: auto-edit · step 4/12 · workspace boundary=on · cwd: /Users/xiongyingchao/Documents/Code/github/coder</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-todo">
+      <div class="scene-meta">
+        <span>场景目标：复杂任务自动初始化 todo，侧栏只读展示</span>
+        <span>需求锚点：02/03/05</span>
+      </div>
+      <div class="app">
+        <div class="content">
+          <div class="timeline">
+            <div class="msg user">
+              <div class="label"><span>user</span><span>复杂任务</span></div>
+              请同时完成登录重构、权限中间件改造、并补全回归测试与迁移文档。
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool done</span><span>todoread</span></div>
+              当前会话无未完成 todo，触发自动初始化。
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool done</span><span>todowrite</span></div>
+              <div class="tool-summary">
+                <span>写入 4 条 todo，满足“最多 1 条 in_progress”约束</span>
+              </div>
+              <details open>
+                <summary>展开 todos[]</summary>
+                <pre>[
+  {"content":"梳理现状与边界","status":"done"},
+  {"content":"设计重构方案与风险","status":"in_progress"},
+  {"content":"定义测试与验证路径","status":"todo"},
+  {"content":"输出实施计划","status":"todo"}
+]</pre>
+              </details>
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant</span><span>plan 输出</span></div>
+              已生成任务拆解。当前处于 `plan` 模式，默认不执行 `write/patch` 与副作用命令。
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="card">
+              <div class="card-title">Context</div>
+              <span>14.5k / 128k</span>
+              <span class="hint">complex_task=true</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Model</div>
+              <span class="pill plan">mode: plan</span>
+              <span>agent: plan</span>
+              <span>model: qwen3-coder-plus</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Todos</div>
+              <div class="todo-item"><span>梳理现状与边界</span><span class="status done">done</span></div>
+              <div class="todo-item"><span>设计重构方案与风险</span><span class="status progress">in_progress</span></div>
+              <div class="todo-item"><span>定义测试与验证路径</span><span class="status todo">todo</span></div>
+              <div class="todo-item"><span>输出实施计划</span><span class="status todo">todo</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Tools</div>
+              <span>current: todowrite</span>
+              <span>write/patch path: blocked in plan</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Skills</div>
+              <span>semantic route: standby</span>
+              <span>used this turn: none</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="input">
+          <div class="inputbox">下一步切换到 auto-edit，开始按 todo 第 2 项落地改动。</div>
+          <div class="input-line">Enter 发送 · Shift+Enter 换行 · 当前: plan · require_todo_for_complex=true · todo_count=4 · cwd: /Users/xiongyingchao/Documents/Code/github/coder</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-skill">
+      <div class="scene-meta">
+        <span>场景目标：skill 自动触发、免审批与失败回退</span>
+        <span>需求锚点：02/03/04</span>
+      </div>
+      <div class="app">
+        <div class="content">
+          <div class="timeline">
+            <div class="msg user">
+              <div class="label"><span>user</span><span>t+0s</span></div>
+              这个需求更像在安装技能，帮我装一个可用的 skill。
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool start</span><span>skill</span></div>
+              <div class="tool-summary">
+                <span>语义路由命中：`skill-installer`</span>
+                <span class="kv">自动触发，免审批确认（仍受 deny 约束）</span>
+              </div>
+              <details>
+                <summary>展开参数</summary>
+                <pre>{"action":"get","name":"skill-installer"}</pre>
+              </details>
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant</span><span>命中成功</span></div>
+              已加载 skill 指南并继续执行安装流程。
+            </div>
+
+            <div class="msg system">
+              <div class="label"><span>fallback</span><span>异常分支</span></div>
+              若技能不存在/加载失败/策略 deny：返回“技能不可用”提示，并回退到无 skill 路径继续任务。
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="card">
+              <div class="card-title">Context</div>
+              <span>17.8k / 128k</span>
+              <span>compaction: standby</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Model</div>
+              <span class="pill default">mode: default</span>
+              <span>agent: build</span>
+              <span>model: qwen3-coder-plus</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Todos</div>
+              <div class="todo-item"><span>技能安装说明</span><span class="status progress">in_progress</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Tools</div>
+              <span>current: skill</span>
+              <span>approval popup: skipped (semantic)</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Skills</div>
+              <span>matched: skill-installer</span>
+              <span>fallback: enabled</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="input">
+          <div class="inputbox">如果 skill 不可用，就按普通路径给我安装步骤。</div>
+          <div class="input-line">Enter 发送 · Shift+Enter 换行 · 当前: default · skill_auto_trigger=true · deny_override=off · cwd: /Users/xiongyingchao/Documents/Code/github/coder</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="scene" id="scene-thinking">
+      <div class="scene-meta">
+        <span>场景目标：thinking 折叠展示 + 最终收敛</span>
+        <span>需求锚点：01/02/05/07</span>
+      </div>
+      <div class="app">
+        <div class="content">
+          <div class="timeline">
+            <div class="msg user">
+              <div class="label"><span>user</span><span>t+0s</span></div>
+              请定位 flaky test，修复后自动验证并给我剩余风险。
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant thinking</span><span>t+0.7s</span></div>
+              <details>
+                <summary>thinking 结果（点击展开/折叠）</summary>
+                <pre>- 先读取最近失败用例和测试日志
+- 判断是否需要子任务（task agent=explore）
+- 若命中代码改动，进入 write/patch + auto verify
+- 验证失败时注入“请修复并再次验证”重试（最多 2 次）</pre>
+              </details>
+            </div>
+
+            <div class="msg tool">
+              <div class="label"><span>tool</span><span>task</span></div>
+              <div class="tool-summary">
+                <span>调用子代理：`explore`（禁写、禁 bash、禁 task 递归）</span>
+              </div>
+              <details>
+                <summary>展开结构化返回契约</summary>
+                <pre>{
+  "status": "success",
+  "artifacts": ["internal/test/report.md"],
+  "failure_reason": "",
+  "next_step": "patch timeout handling in flaky case"
+}</pre>
+              </details>
+            </div>
+
+            <div class="msg assistant">
+              <div class="label"><span>assistant</span><span>收敛</span></div>
+              推理完成并已收敛：
+              <br />1) flaky 根因是超时窗口过短。
+              <br />2) 已修复并通过白名单验证命令。
+              <br />3) 剩余风险：并发场景覆盖仍不足。
+            </div>
+
+            <div class="msg system">
+              <div class="label"><span>异常兜底</span><span>step limit</span></div>
+              若连续工具循环未收敛且达到上限，回合返回 `step limit reached`。
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="card">
+              <div class="card-title">Context</div>
+              <span>33.6k / 128k</span>
+              <span>loop_state: converged</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Model</div>
+              <span class="pill auto-edit">mode: auto-edit</span>
+              <span>agent: build</span>
+              <span>model: qwen3-coder-plus</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Todos</div>
+              <div class="todo-item"><span>定位 flaky 根因</span><span class="status done">done</span></div>
+              <div class="todo-item"><span>修复与验证</span><span class="status done">done</span></div>
+              <div class="todo-item"><span>补剩余风险说明</span><span class="status progress">in_progress</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Tools</div>
+              <span>calls: task/read/patch/bash</span>
+              <span>step: 5 / 12</span>
+            </div>
+            <div class="card">
+              <div class="card-title">Skills</div>
+              <span>semantic route: on</span>
+              <span>used this turn: none</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="input">
+          <div class="inputbox">继续：把剩余风险转为后续 todo。</div>
+          <div class="input-line">Enter 发送 · Shift+Enter 换行 · 当前: auto-edit · max_verify_attempts=2 · final_answer=ready · cwd: /Users/xiongyingchao/Documents/Code/github/coder</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const buttons = document.querySelectorAll('.scene-nav button');
+    const scenes = document.querySelectorAll('.scene');
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        buttons.forEach((b) => b.classList.remove('active'));
+        scenes.forEach((s) => s.classList.remove('active'));
+        button.classList.add('active');
+        document.getElementById(button.dataset.target).classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>
