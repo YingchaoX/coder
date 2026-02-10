@@ -6,10 +6,12 @@ toolchain go1.24.13
 
 require (
 	github.com/chzyer/readline v1.5.1
+	github.com/pkoukk/tiktoken-go v0.1.8
 	modernc.org/sqlite v1.45.0
 )
 
 require (
+	github.com/dlclark/regexp2 v1.10.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

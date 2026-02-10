@@ -68,20 +68,10 @@ func readFile(path string, maxBytes int) (string, bool) {
 	return content, true
 }
 
+// EstimateTokens 使用 Tokenizer 计算 token 数（支持 tiktoken 精确计数或启发式回退）
+// EstimateTokens uses Tokenizer for token counting (tiktoken precise or heuristic fallback)
 func EstimateTokens(messages []chat.Message) int {
-	total := 0
-	for _, m := range messages {
-		total += len([]rune(m.Content))/4 + 4
-		if len(m.ToolCalls) > 0 {
-			for _, tc := range m.ToolCalls {
-				total += len([]rune(tc.Function.Name))/4 + len([]rune(tc.Function.Arguments))/4 + 8
-			}
-		}
-	}
-	if total < len(messages)*4 {
-		total = len(messages) * 4
-	}
-	return total
+	return DefaultTokenizer().Count(messages)
 }
 
 func Compact(messages []chat.Message, keepRecent int, pruneToolOutputs bool) ([]chat.Message, string, bool) {
