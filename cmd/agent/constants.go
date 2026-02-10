@@ -1,35 +1,37 @@
 package main
 
-import "regexp"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"regexp"
+	"time"
+
+	"coder/internal/config"
+	"coder/internal/skills"
+)
 
 const defaultSystemPrompt = "You are an offline coding agent. Use tools when needed, keep answers concise, briefly state your next step before calling tools, and reply in the same language as the user unless asked otherwise."
 
-const (
-	cliAnsiReset  = "\x1b[0m"
-	cliAnsiCyan   = "\x1b[36m"
-	cliAnsiYellow = "\x1b[33m"
-	cliAnsiGreen  = "\x1b[32m"
-	cliAnsiRed    = "\x1b[31m"
-)
+var mentionPattern = regexp.MustCompile(`@([^\s]+)`)
 
-var replCommands = []string{
-	"/help",
-	"/new",
-	"/sessions",
-	"/use <id>",
-	"/fork <id>",
-	"/revert <n>",
-	"/agent <name>",
-	"/models [model|index]",
-	"/context",
-	"/tools",
-	"/skills",
-	"/todo",
-	"/summarize",
-	"/compact",
-	"/config",
-	"/mcp",
-	"/exit",
+func newSessionID() string {
+	buf := make([]byte, 4)
+	_, _ = rand.Read(buf)
+	return fmt.Sprintf("sess_%d_%s", time.Now().UTC().Unix(), hex.EncodeToString(buf))
 }
 
-var mentionPattern = regexp.MustCompile(`@([^\s]+)`)
+func mergeAgentConfig(a config.AgentConfig, b config.AgentConfig) config.AgentConfig {
+	out := a
+	if b.Default != "" {
+		out.Default = b.Default
+	}
+	if len(b.Definitions) > 0 {
+		out.Definitions = append(out.Definitions, b.Definitions...)
+	}
+	return out
+}
+
+func discoverSkills(cfg config.Config) (*skills.Manager, error) {
+	return skills.Discover(cfg.Skills.Paths)
+}

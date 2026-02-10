@@ -1,10 +1,14 @@
-# Offline Coding Agent Requirements (v1.0)
+# Offline Coding Agent Requirements
 
 ## 1. Document Info
 - Project: Offline single-binary coding agent (OpenCode-inspired)
-- Date: 2026-02-08
+- Date: 2026-02-08 (v1) / 2026-02-10 (v2)
 - Target platform: Linux (`x86_64`, `arm64`; Hygon treated as `x86_64`)
 - Product form: TUI client only
+
+---
+
+# Part I — v1 Requirements (Implemented)
 
 ## 2. Background And Scope
 - The environment is offline.
@@ -451,3 +455,524 @@
 4. Write result readability (mandatory)
 - `write` tool result should expose operation metadata (`created`/`updated`/`unchanged`) and change summary (`additions`/`deletions`).
 - Terminal tool result rendering should support multi-line summaries (including diff/checklist snippets) for readability.
+
+---
+
+# Part II — v2 Requirements (2026-02-10)
+
+> v2 是增量升级，不替换任何 v1 已实现功能。所有新增依赖必须为纯 Go 实现（CGo-free），确保继续支持离线单二进制交付。
+>
+> v2 is an incremental upgrade that does not replace any implemented v1 functionality. All new dependencies must be pure Go (CGo-free) to maintain offline single-binary delivery.
+
+## 23. v2 背景与目标 / v2 Background And Goals
+
+### 23.1 驱动因素 / Drivers
+- v1 的 REPL 模式在多文件编辑、长对话场景下用户体验不佳
+- token 计数使用 `len(runes)/4` 粗估，误差 30-50%，导致 compaction 时机不准
+- 手写 SSE 解析脆弱，需 `repairJSON` 打补丁，不如标准 SDK 可靠
+- JSON 文件持久化缺乏原子写入保障，并发场景下有丢数据风险
+- compaction 摘要基于正则提取，质量有限
+- 无 reasoning token 支持，无法利用 o1/o3 系列模型能力
+- 缺乏国际化支持
+
+### 23.2 v2 产品目标 / v2 Product Goals
+1. 提供类 OpenCode 的全屏终端 TUI 交互体验
+2. 精确的 token 管理和上下文控制
+3. 可靠的 provider 通信层（SDK-based）
+4. 可靠的数据持久化（SQLite WAL）
+5. 高质量的上下文压缩（LLM-generated summaries）
+6. 支持 reasoning token（o1/o3 系列模型）
+7. 国际化/本地化支持
+8. 测试覆盖率 ≥ 60%
+
+### 23.3 v2 约束 / v2 Constraints
+- 继续保持单二进制交付，所有依赖纯 Go（CGo-free）
+- 继续支持离线环境，无互联网依赖
+- 继续支持 OpenAI-compatible API（vLLM/DashScope 等）
+- 向后兼容 v1 配置文件格式（新字段可选，旧字段保留）
+- 向后兼容 v1 session 数据（提供迁移路径）
+
+## 24. TUI 全面升级 / TUI Overhaul
+
+### 24.1 框架选型 / Framework
+- 使用 Bubble Tea (`charmbracelet/bubbletea`) 实现全屏交互式 TUI
+- 使用 Lip Gloss (`charmbracelet/lipgloss`) 处理样式和布局
+- 使用 Bubbles (`charmbracelet/bubbles`) 提供标准 UI 组件
+
+### 24.2 多面板布局 / Multi-Panel Layout
+1. **主布局**: 三栏/可切换面板
+   - **聊天面板 (Chat Panel)**: 对话历史 + 流式输出区域
+   - **文件面板 (Files Panel)**: 当前会话涉及的文件列表 + 预览
+   - **日志面板 (Logs Panel)**: 工具执行日志 + MCP 状态 + 系统事件
+2. **侧边栏**: 上下文信息
+   - 当前会话标题和描述
+   - context token 使用量 (bar / percentage)
+   - 当前 Agent 名称和模型
+   - MCP 服务器连接状态
+   - LSP 状态（预留）
+   - Todo 列表概览
+3. **底部状态栏**:
+   - 当前 agent + model
+   - workspace 路径
+   - 快捷键提示 (`tab` switch panel, `esc` interrupt, `ctrl+p` commands)
+4. **输入区域**:
+   - 多行输入编辑器 (textarea bubble)
+   - CJK/宽字符正确处理
+   - 输入历史 (Up/Down)
+   - `@path` 补全
+
+### 24.3 Markdown 渲染 / Markdown Rendering
+- 使用 Glamour (`charmbracelet/glamour`) 渲染 assistant 回复中的 markdown
+- 支持: 标题、列表、代码块、表格、粗体/斜体、链接
+- 代码块使用 Chroma 语法高亮
+- 自动检测 terminal 宽度和颜色能力
+- 暗色主题为默认，可通过 `GLAMOUR_STYLE` 切换
+
+### 24.4 语法高亮 / Syntax Highlighting
+- 使用 Chroma (`alecthomas/chroma`) 对代码块和 diff 进行语法高亮
+- 支持的场景:
+  - assistant 回复中的 fenced code blocks (```go, ```python, etc.)
+  - `read` 工具结果中的文件内容
+  - `write`/`patch` 工具结果中的 diff
+  - 文件面板中的文件预览
+- 终端 256 色 / true color 自动检测
+
+### 24.5 结构化 Diff 视图 / Structured Diff View
+- `write` 和 `patch` 工具执行后展示结构化 diff
+- 格式: 统一 diff 格式 + 行号 + 语法高亮
+- 长 diff 支持折叠/展开
+- 添加/删除行使用 green/red 背景色
+- Approval 视图中直接展示 diff 预览
+
+### 24.6 宽字符处理 / Wide Character Handling
+- 使用 `mattn/go-runewidth` 处理 CJK 宽字符宽度计算
+- 所有面板布局计算使用 runewidth 而非 `len()`
+- 输入编辑器正确处理 CJK 光标移动
+- 表格和对齐输出使用 runewidth 计算列宽
+
+### 24.7 面板切换与快捷键 / Keybindings
+| 快捷键 | 功能 |
+|---|---|
+| `Tab` | 切换面板焦点 |
+| `Esc` | 中断当前生成 / 返回输入 |
+| `Ctrl+P` | 打开命令面板 |
+| `Ctrl+L` | 清屏 |
+| `Ctrl+C` | 退出 (double press) |
+| `Enter` | 提交输入 |
+| `Shift+Enter` | 输入换行 |
+| `Up/Down` | 输入历史 (在输入区) / 滚动 (在面板区) |
+| `PgUp/PgDn` | 面板翻页 |
+| `Ctrl+F` | 面板内搜索 |
+
+### 24.8 Approval 对话框 / Approval Dialog
+- 全屏模态对话框，不再使用 readline 行输入
+- 显示: 工具名称、原因、参数摘要、diff 预览
+- 按键: `y` allow once / `n` deny / `a` allow all (非危险) / `Esc` deny
+- 危险命令: 红色警告横幅，无 `allow all` 选项
+
+### 24.9 Spinner 与进度指示 / Spinners
+- 模型生成时显示 spinner + elapsed time
+- 工具执行时显示工具名 + spinner
+- 长时间 bash 命令显示实时 stdout 流
+
+## 25. Token 精确计数 / Precise Token Counting
+
+### 25.1 实现方式 / Implementation
+- 使用 `tiktoken-go` (纯 Go 实现) 进行精确 token 计数
+- 支持的编码: `cl100k_base` (GPT-4 / ChatGPT), `o200k_base` (o1/o3)
+- 编码选择基于模型名称自动映射
+
+### 25.2 BPE 数据嵌入 / BPE Data Embedding
+- 离线环境要求: BPE 编码数据必须嵌入二进制 (`go:embed`)
+- 需要嵌入的文件:
+  - `cl100k_base.tiktoken` (~1.6 MB)
+  - `o200k_base.tiktoken` (~4.1 MB, 如支持 o-series)
+- 或者使用预编译的 rank map 减小二进制体积
+
+### 25.3 应用场景 / Usage
+- `contextmgr.EstimateTokens()` 替换为精确计数
+- compaction threshold 检查精确化
+- `/context` 命令显示精确 token 使用量
+- 侧边栏实时显示 token 用量百分比
+- 工具结果截断阈值基于精确 token 计数
+
+### 25.4 性能要求 / Performance
+- 单次 token 计数 < 5ms (典型 4K token 消息)
+- 编码器实例全局单例，避免重复初始化
+- 支持增量计数（对流式输出）
+
+## 26. Provider SDK 化 / Provider SDK Migration
+
+### 26.1 SDK 选型 / SDK Choice
+- 使用 `sashabaranov/go-openai` 作为 OpenAI-compatible SDK
+- 该 SDK 纯 Go，支持 SSE streaming、tool calling、vision
+- 替换当前手写的 SSE 解析逻辑 (`internal/provider/openai.go`)
+
+### 26.2 Provider 接口抽象 / Provider Interface
+```go
+// Provider 接口 - 面向未来多 provider 扩展
+// Provider interface - designed for future multi-provider extensibility
+type Provider interface {
+    // Chat 发送聊天请求并返回流式响应
+    // Chat sends a chat request and returns a streaming response
+    Chat(ctx context.Context, req ChatRequest) (*ChatStream, error)
+
+    // ListModels 列出可用模型
+    // ListModels lists available models
+    ListModels(ctx context.Context) ([]ModelInfo, error)
+
+    // Name 返回 provider 名称
+    // Name returns the provider name
+    Name() string
+}
+```
+
+### 26.3 可扩展性设计 / Extensibility
+- 当前仅实现 `OpenAIProvider`，但接口设计支持未来扩展:
+  - `AnthropicProvider` (Claude)
+  - `GoogleProvider` (Gemini)
+  - `OllamaProvider` (本地模型)
+- Provider 通过 config 中的 `provider.type` 字段选择
+- 默认 `type: "openai"` 保持向后兼容
+
+### 26.4 Reasoning Token 支持 / Reasoning Token Support
+- 支持 o1/o3 系列模型的 reasoning 输出
+- Message 类型扩展:
+  - 新增 `ReasoningContent` 字段存储推理过程
+  - 新增 `reasoning` 类型的 content part
+- TUI 渲染:
+  - reasoning 内容使用可折叠区域显示
+  - 默认折叠，用户可展开查看完整推理过程
+  - 使用 dimmed/gray 样式与正常回复区分
+- Token 计数:
+  - reasoning token 独立计数
+  - 在 `/context` 和侧边栏中分别显示 `prompt/completion/reasoning` 用量
+
+### 26.5 流式处理 / Streaming
+- 使用 SDK 原生 SSE stream 接口
+- 回调签名:
+  - `OnTextChunk(chunk string)` — 文本增量
+  - `OnReasoningChunk(chunk string)` — 推理增量
+  - `OnToolCall(call ToolCall)` — 工具调用
+  - `OnFinish(usage UsageInfo)` — 完成 + token 用量
+- 错误处理:
+  - 网络断开: 自动重连 + 指数退避 (最多 4 次)
+  - 429 限速: 解析 `Retry-After` header，等待后重试
+  - 500 系错误: 指数退避重试
+
+## 27. SQLite 持久化 / SQLite Persistence
+
+### 27.1 选型 / Choice
+- 使用 `modernc.org/sqlite` — 纯 Go (CGo-free) SQLite 实现
+- WAL 模式 (Write-Ahead Logging) 提供并发安全
+- 单文件数据库: `~/.coder/coder.db`
+
+### 27.2 数据库 Schema / Database Schema
+```sql
+-- 会话元数据 / Session metadata
+CREATE TABLE sessions (
+    id            TEXT PRIMARY KEY,
+    title         TEXT NOT NULL DEFAULT '',
+    agent         TEXT NOT NULL DEFAULT 'build',
+    model         TEXT NOT NULL DEFAULT '',
+    cwd           TEXT NOT NULL DEFAULT '',
+    summary       TEXT NOT NULL DEFAULT '',
+    compact_auto  INTEGER NOT NULL DEFAULT 1,
+    compact_prune INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+-- 会话消息 / Session messages
+CREATE TABLE messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT NOT NULL REFERENCES sessions(id),
+    seq         INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL DEFAULT '',
+    name        TEXT NOT NULL DEFAULT '',
+    tool_call_id TEXT NOT NULL DEFAULT '',
+    tool_calls  TEXT NOT NULL DEFAULT '[]',  -- JSON array
+    reasoning   TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    UNIQUE(session_id, seq)
+);
+
+-- Todo 条目 / Todo items
+CREATE TABLE todos (
+    id         TEXT NOT NULL,
+    session_id TEXT NOT NULL REFERENCES sessions(id),
+    content    TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'pending',
+    priority   TEXT NOT NULL DEFAULT 'medium',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(session_id, id)
+);
+
+-- 权限决策日志 / Permission decision log
+CREATE TABLE permission_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    tool       TEXT NOT NULL,
+    decision   TEXT NOT NULL,
+    reason     TEXT NOT NULL DEFAULT '',
+    args_hash  TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+-- 索引 / Indexes
+CREATE INDEX idx_messages_session ON messages(session_id, seq);
+CREATE INDEX idx_todos_session ON todos(session_id);
+CREATE INDEX idx_permission_log_session ON permission_log(session_id);
+```
+
+### 27.3 迁移策略 / Migration Strategy
+- 首次启动 v2 时:
+  1. 创建 SQLite 数据库 + schema
+  2. 扫描旧版 JSON session 文件
+  3. 自动迁移到 SQLite
+  4. 保留旧文件作为备份 (不删除)
+- 后续版本的 schema 变更通过 migration table 管理
+
+### 27.4 并发安全 / Concurrency
+- 连接池: 最多 1 writer + N readers
+- WAL 模式: 读写不互斥
+- 事务: session save 使用 BEGIN/COMMIT 包裹
+- busy timeout: 5 秒
+
+## 28. LLM Compaction / LLM-Based Compaction
+
+### 28.1 策略 / Strategy
+- 当 context token 超过阈值时，使用 LLM 生成高质量摘要
+- 替换 v1 中基于正则提取的 `summarizeMessages()` 函数
+- 使用内部 `summarizer` agent profile 执行摘要
+
+### 28.2 摘要 Prompt / Summary Prompt
+```
+Summarize this conversation for an AI coding assistant that will continue the task.
+Preserve: current objective, files modified/created, key decisions, pending issues, next steps.
+Be concise but complete. Output plain text, no markdown formatting.
+```
+
+### 28.3 回退策略 / Fallback
+- 如果 LLM 调用失败（网络/超时），回退到 v1 的正则提取方式
+- 摘要结果缓存，避免重复调用
+- 摘要 token 用量不计入用户 context budget
+
+### 28.4 触发条件 / Triggers
+- 自动: `compaction.auto=true` 且 context 超过 `compaction.threshold`
+- 手动: 用户执行 `/compact` 命令
+- compaction 后保留最近 `compaction.recent_messages` 条消息
+
+## 29. 国际化 / Internationalization (i18n)
+
+### 29.1 设计原则 / Design Principles
+- 所有用户可见的 UI 字符串通过 message catalog 管理
+- 运行时根据 locale 自动选择语言
+- locale 检测优先级: `AGENT_LANG` > `LANG` > `LC_ALL` > 默认 `en`
+
+### 29.2 支持语言 / Supported Languages
+- v2 首批: `en` (English), `zh-CN` (简体中文)
+- message catalog 使用 Go embed 嵌入
+
+### 29.3 覆盖范围 / Scope
+- TUI 面板标题和标签
+- 状态栏文本
+- 命令帮助文本
+- 错误消息
+- approval 对话框文本
+- 默认 system prompt (可配置覆盖)
+- **不覆盖**: LLM 输出内容 (由模型和用户语言决定)
+
+### 29.4 实现方式 / Implementation
+```go
+// i18n 包结构 / i18n package structure
+// internal/i18n/
+//   catalog.go     — message ID -> template 映射
+//   en.go          — English messages
+//   zh_cn.go       — 简体中文 messages
+//   i18n.go        — T() 函数 + locale 检测
+```
+
+## 30. 测试与质量 / Testing And Quality
+
+### 30.1 覆盖率目标 / Coverage Target
+- 总体代码覆盖率 ≥ 60%
+- 核心模块 (orchestrator, provider, storage, security) ≥ 75%
+- 工具模块 (tools/*) ≥ 70%
+- TUI 模块 ≥ 40% (UI 测试天然较难)
+
+### 30.2 测试类型 / Test Types
+1. **单元测试**: 每个包的纯逻辑测试
+2. **集成测试**: mock provider + orchestrator 端到端测试
+3. **Snapshot 测试**: TUI 渲染输出的 golden file 比对
+4. **Benchmark 测试**: tiktoken 编码性能、grep 搜索性能
+
+### 30.3 可配置 Lint + Test Pipeline
+- CI 中执行:
+  1. `gofmt -l .` — 格式化检查
+  2. `go vet ./...` — 静态分析
+  3. `staticcheck ./...` — 额外静态检查 (可选)
+  4. `go test -race -coverprofile=coverage.out ./...` — 带竞态检测的测试
+  5. `go tool cover -func=coverage.out` — 覆盖率报告
+  6. `go build ./cmd/agent` — 编译检查
+- 本地开发:
+  - `make test` — 快速测试
+  - `make lint` — lint 检查
+  - `make coverage` — 覆盖率报告
+  - `make all` — lint + test + build
+
+### 30.4 Agent 自动验证升级 / Auto-Verify Upgrade
+- 支持配置多个验证命令（按顺序执行）
+- 支持 sandbox 内测试执行:
+  - 验证命令在隔离环境中执行
+  - 捕获 exit code + stdout + stderr
+  - 超时保护
+- 验证命令可按文件类型配置:
+  ```json
+  {
+    "workflow": {
+      "verify_commands": {
+        "*.go": ["go test ./...", "go vet ./..."],
+        "*.py": ["pytest", "ruff check ."],
+        "*.ts": ["npm test -- --watchAll=false"],
+        "*": []
+      }
+    }
+  }
+  ```
+
+## 31. v2 新增配置项 / v2 New Config Keys
+
+```jsonc
+{
+  // provider 扩展 / Provider extensions
+  "provider": {
+    "type": "openai",              // "openai" (default), future: "anthropic", "google"
+    "reasoning": true,             // 启用 reasoning token 解析 / Enable reasoning token parsing
+    "max_retries": 4,              // 最大重试次数 / Max retry count
+    "retry_backoff_ms": [1000, 2000, 4000, 8000]  // 退避间隔 / Backoff intervals
+  },
+
+  // TUI 配置 / TUI config
+  "tui": {
+    "theme": "dark",               // "dark" | "light"
+    "glamour_style": "dark",       // Glamour 主题 / Glamour theme
+    "show_reasoning": false,       // 默认是否显示 reasoning / Show reasoning by default
+    "sidebar_width": 30,           // 侧边栏宽度 / Sidebar width percentage
+    "max_diff_lines": 80           // diff 预览最大行数 / Max diff preview lines
+  },
+
+  // 存储配置扩展 / Storage extensions
+  "storage": {
+    "type": "sqlite",              // "sqlite" (v2 default), "json" (v1 compat)
+    "sqlite_path": "~/.coder/coder.db",
+    "wal_mode": true
+  },
+
+  // compaction 扩展 / Compaction extensions
+  "compaction": {
+    "strategy": "llm",             // "llm" (v2 default), "regex" (v1 compat)
+    "summary_model": "",           // 空=使用当前模型 / Empty=use current model
+    "max_summary_tokens": 500
+  },
+
+  // i18n 配置 / i18n config
+  "i18n": {
+    "locale": "",                  // 空=自动检测 / Empty=auto-detect
+    "fallback": "en"
+  },
+
+  // 测试 pipeline / Test pipeline
+  "workflow": {
+    "verify_commands": {},          // 按文件类型 / By file type (v2 format)
+    "lint_commands": [],            // lint 命令列表 / Lint command list
+    "test_timeout_ms": 60000
+  }
+}
+```
+
+## 32. v2 验收标准 / v2 Acceptance Criteria
+
+1. 启动后展示全屏 Bubble Tea TUI，包含聊天、文件、日志三面板
+2. 侧边栏实时显示 context token 用量、agent、model、MCP 状态
+3. assistant 回复中的 markdown 正确渲染（标题、列表、代码块带语法高亮）
+4. `write`/`patch` 执行后展示结构化 diff 视图，带语法高亮和行号
+5. CJK 输入/删除/光标移动在全屏 TUI 中不出现排版异常
+6. token 计数精确度误差 < 5% (对比 OpenAI tokenizer 结果)
+7. 流式输出使用 SDK stream，无手写 SSE 解析
+8. 支持 reasoning token 的模型输出（如 o1/o3），reasoning 内容可折叠显示
+9. Session 数据持久化到 SQLite，WAL 模式启用
+10. 旧版 JSON session 文件自动迁移到 SQLite
+11. compaction 使用 LLM 生成摘要，fallback 到正则提取
+12. UI 文本支持 en/zh-CN 两种语言，自动检测 locale
+13. 测试覆盖率 ≥ 60%，核心模块 ≥ 75%
+14. CI pipeline 包含 lint + vet + test + race + coverage + build
+15. Makefile 提供 `test`/`lint`/`coverage`/`build`/`all` targets
+
+## 33. v2 里程碑 / v2 Milestones
+
+1. **M7: 基础层升级** (Week 1-2)
+   - SQLite 持久化 + JSON 迁移
+   - tiktoken 精确 token 计数
+   - OpenAI SDK 替换 + reasoning token
+   - Provider 接口抽象
+
+2. **M8: TUI 框架** (Week 3-5)
+   - Bubble Tea 全屏应用骨架
+   - 多面板布局 (聊天/文件/日志)
+   - 输入编辑器 (多行 + CJK)
+   - 侧边栏信息面板
+   - 底部状态栏
+
+3. **M9: TUI 渲染** (Week 5-7)
+   - Glamour markdown 渲染
+   - Chroma 语法高亮
+   - 结构化 diff 视图
+   - Approval 模态对话框
+   - Spinner + 进度指示
+
+4. **M10: 功能升级** (Week 7-8)
+   - LLM compaction
+   - i18n (en + zh-CN)
+   - 可配置 lint/test pipeline
+
+5. **M11: 质量强化** (Week 8-10)
+   - 测试覆盖率提升
+   - Benchmark 测试
+   - 性能优化
+   - 文档更新
+
+## 34. v2 风险与缓解 / v2 Risks And Mitigations
+
+1. **Risk**: Bubble Tea TUI 大量重写可能引入回归
+   - Mitigation: 保留 `--repl` flag 可切换回 v1 REPL 模式
+
+2. **Risk**: `modernc.org/sqlite` 纯 Go 性能低于 CGo SQLite
+   - Mitigation: WAL + 合理缓存; session 数据量不大，性能足够
+
+3. **Risk**: tiktoken BPE 数据嵌入增大二进制体积 (~5 MB)
+   - Mitigation: 使用压缩嵌入 + lazy init; 或提供 slim build 选项
+
+4. **Risk**: LLM compaction 调用失败影响用户体验
+   - Mitigation: 双策略回退 (LLM -> regex); compaction 失败不阻塞正常使用
+
+5. **Risk**: 多面板 TUI 在小终端窗口下布局异常
+   - Mitigation: 响应式布局; 窗口过小时自动切换为单面板模式
+
+## 35. v2 依赖清单 / v2 Dependency List
+
+| 包 | 用途 | 纯 Go | 大小估算 |
+|---|---|---|---|
+| `charmbracelet/bubbletea` | TUI 框架 | Yes | ~50 KB |
+| `charmbracelet/lipgloss` | 样式/布局 | Yes | ~30 KB |
+| `charmbracelet/bubbles` | UI 组件 | Yes | ~40 KB |
+| `charmbracelet/glamour` | Markdown 渲染 | Yes | ~100 KB |
+| `alecthomas/chroma` | 语法高亮 | Yes | ~2 MB (含语法定义) |
+| `mattn/go-runewidth` | 宽字符宽度 | Yes | ~10 KB |
+| `sashabaranov/go-openai` | OpenAI SDK | Yes | ~50 KB |
+| `modernc.org/sqlite` | SQLite (CGo-free) | Yes | ~8 MB (含 SQLite C 翻译) |
+| `tiktoken-go/tokenizer` | Token 计数 | Yes | ~2 MB (含 BPE 数据) |
+
+**预计二进制体积增长**: ~12-15 MB (从 ~8 MB 到 ~20-23 MB)
