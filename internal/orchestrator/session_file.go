@@ -168,5 +168,24 @@ func (o *Orchestrator) syncMessagesToStore() {
 	if sid == "" {
 		return
 	}
-	_ = o.store.SaveMessages(sid, o.messages)
+	current := len(o.messages)
+	if current == o.lastSyncedMsgN {
+		return
+	}
+	if current < o.lastSyncedMsgN {
+		if err := o.store.SaveMessages(sid, o.messages); err == nil {
+			o.lastSyncedMsgN = current
+		}
+		return
+	}
+	delta := o.messages[o.lastSyncedMsgN:]
+	if len(delta) > 0 {
+		if err := o.store.AppendMessages(sid, o.lastSyncedMsgN, delta); err == nil {
+			o.lastSyncedMsgN = current
+			return
+		}
+	}
+	if err := o.store.SaveMessages(sid, o.messages); err == nil {
+		o.lastSyncedMsgN = current
+	}
 }

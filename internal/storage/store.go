@@ -13,6 +13,7 @@ type Store interface {
 
 	// Message 操作 / Message operations
 	SaveMessages(sessionID string, messages []chat.Message) error
+	AppendMessages(sessionID string, startSeq int, messages []chat.Message) error
 	LoadMessages(sessionID string) ([]chat.Message, error)
 
 	// Todo 操作 / Todo operations

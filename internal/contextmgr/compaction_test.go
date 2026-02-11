@@ -21,8 +21,8 @@ func TestRegexCompaction_Summarize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
-	if !strings.Contains(summary, "objective") {
-		t.Fatalf("summary should contain 'objective': %q", summary)
+	if !strings.Contains(summary, "## Goal") {
+		t.Fatalf("summary should contain structured goal section: %q", summary)
 	}
 }
 

@@ -315,3 +315,5 @@ go tool cover -func=coverage.out
 - 以 `docs/requirements/*.md` 与 `docs/technical/*.md` 为准，更新 README 中对应说明。
 - 按 `docs/testing/00-测试设计与TDD计划.md` 补充或调整测试用例。
 - 在提交前运行 `go test ./...` 与覆盖率检查，确保行为与文档保持一致。
+
+当前时间：2026-02-11 14:30:00

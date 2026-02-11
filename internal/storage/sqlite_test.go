@@ -120,6 +120,41 @@ func TestSQLiteStore_Messages(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_AppendMessages(t *testing.T) {
+	store := newTestStore(t)
+
+	meta := SessionMeta{ID: "sess_msg_append_001", Agent: "build"}
+	if err := store.CreateSession(meta); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	part1 := []chat.Message{
+		{Role: "user", Content: "hello"},
+		{Role: "assistant", Content: "hi"},
+	}
+	if err := store.AppendMessages("sess_msg_append_001", 0, part1); err != nil {
+		t.Fatalf("AppendMessages part1: %v", err)
+	}
+
+	part2 := []chat.Message{
+		{Role: "user", Content: "next"},
+	}
+	if err := store.AppendMessages("sess_msg_append_001", 2, part2); err != nil {
+		t.Fatalf("AppendMessages part2: %v", err)
+	}
+
+	loaded, err := store.LoadMessages("sess_msg_append_001")
+	if err != nil {
+		t.Fatalf("LoadMessages: %v", err)
+	}
+	if len(loaded) != 3 {
+		t.Fatalf("LoadMessages count=%d, want 3", len(loaded))
+	}
+	if loaded[2].Content != "next" {
+		t.Fatalf("msg[2].Content=%q, want %q", loaded[2].Content, "next")
+	}
+}
+
 func TestSQLiteStore_Todos(t *testing.T) {
 	store := newTestStore(t)
 

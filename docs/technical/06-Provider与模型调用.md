@@ -8,7 +8,7 @@
 - `SetModel`
 - `Name`
 
-目标态默认实现：OpenAI SDK Provider。
+目标态默认实现：单一 OpenAI-compatible Provider（不兼容多 provider 路由，不接入 MCP）。
 
 ## 2. OpenAI SDK 接入
 - SDK：`github.com/sashabaranov/go-openai`
@@ -38,6 +38,7 @@
 - 最大重试次数：`MaxRetries`
 - 退避策略：指数退避（例如 150ms 起步）
 - `context canceled/deadline exceeded` 直接返回，不重试
+- `TimeoutMS` 必须作用到实际 HTTP 请求链路（包含兼容流式路径），防止请求无限挂起。
 
 ## 5. 异常策略
 - 流式中断但已有部分内容：返回部分结果。

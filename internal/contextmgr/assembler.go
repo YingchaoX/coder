@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"coder/internal/chat"
 )
@@ -18,6 +19,8 @@ type Assembler struct {
 	GlobalRulesPath   string
 	InstructionFiles  []string
 	ToolOutputMaxRune int
+	staticOnce        sync.Once
+	staticMessages    []chat.Message
 }
 
 func New(systemPrompt, workspaceRoot, globalRulesPath string, instructionFiles []string) *Assembler {
@@ -31,6 +34,13 @@ func New(systemPrompt, workspaceRoot, globalRulesPath string, instructionFiles [
 }
 
 func (a *Assembler) StaticMessages() []chat.Message {
+	a.staticOnce.Do(func() {
+		a.staticMessages = a.buildStaticMessages()
+	})
+	return append([]chat.Message(nil), a.staticMessages...)
+}
+
+func (a *Assembler) buildStaticMessages() []chat.Message {
 	out := []chat.Message{}
 	if a.SystemPrompt != "" {
 		out = append(out, chat.Message{Role: "system", Content: a.SystemPrompt})
@@ -149,7 +159,9 @@ func summarizeMessages(msgs []chat.Message) string {
 	objective := ""
 	files := map[string]struct{}{}
 	risks := map[string]struct{}{}
-	steps := []string{}
+	instructions := []string{}
+	accomplished := []string{}
+	nextSteps := []string{}
 
 	pathPattern := regexp.MustCompile(`([A-Za-z0-9_./-]+\.[A-Za-z0-9_]+)`)
 	for _, m := range msgs {
@@ -158,10 +170,19 @@ func summarizeMessages(msgs []chat.Message) string {
 			if objective == "" {
 				objective = strings.TrimSpace(m.Content)
 			}
-			steps = append(steps, short(m.Content, 140))
+			text := strings.TrimSpace(m.Content)
+			if looksLikeInstruction(text) {
+				instructions = append(instructions, short(text, 160))
+			}
+			nextSteps = append(nextSteps, short(text, 140))
 		case "assistant":
-			if strings.Contains(strings.ToLower(m.Content), "next") {
-				steps = append(steps, short(m.Content, 140))
+			lower := strings.ToLower(m.Content)
+			if strings.Contains(lower, "updated") || strings.Contains(lower, "implemented") || strings.Contains(lower, "created") ||
+				strings.Contains(lower, "fixed") || strings.Contains(lower, "completed") || strings.Contains(lower, "已完成") {
+				accomplished = append(accomplished, short(m.Content, 140))
+			}
+			if strings.Contains(lower, "next") || strings.Contains(lower, "todo") || strings.Contains(lower, "下一步") {
+				nextSteps = append(nextSteps, short(m.Content, 140))
 			}
 		case "tool":
 			if strings.Contains(strings.ToLower(m.Content), "denied") || strings.Contains(strings.ToLower(m.Content), "error") {
@@ -181,33 +202,68 @@ func summarizeMessages(msgs []chat.Message) string {
 
 	fileList := mapKeys(files, 8)
 	riskList := mapKeys(risks, 5)
-	stepList := uniqueStrings(steps, 4)
+	instructionList := uniqueStrings(instructions, 4)
+	accomplishedList := uniqueStrings(accomplished, 5)
+	stepList := uniqueStrings(nextSteps, 4)
 
 	var b strings.Builder
-	b.WriteString("- current objective: ")
+	b.WriteString("## Goal\n")
 	b.WriteString(objective)
-	b.WriteString("\n")
-	b.WriteString("- files touched: ")
-	if len(fileList) == 0 {
-		b.WriteString("(none captured)")
-	} else {
-		b.WriteString(strings.Join(fileList, ", "))
-	}
-	b.WriteString("\n")
-	b.WriteString("- pending risks: ")
-	if len(riskList) == 0 {
-		b.WriteString("(none captured)")
-	} else {
-		b.WriteString(strings.Join(riskList, " | "))
-	}
-	b.WriteString("\n")
-	b.WriteString("- next actionable steps: ")
+	b.WriteString("\n\n## Instructions\n")
+	b.WriteString(formatSectionList(instructionList, "No additional constraints captured."))
+	b.WriteString("\n\n## Accomplished\n")
+	b.WriteString(formatSectionList(accomplishedList, "No explicit completed work captured."))
+	b.WriteString("\n\n## Risks\n")
+	b.WriteString(formatSectionList(riskList, "No blocking risks captured."))
+	b.WriteString("\n\n## Next Steps\n")
 	if len(stepList) == 0 {
-		b.WriteString("continue from latest user request")
+		b.WriteString("- Continue from the latest user request.")
 	} else {
-		b.WriteString(strings.Join(stepList, " -> "))
+		b.WriteString(formatSectionList(stepList, ""))
 	}
+	b.WriteString("\n\n## Relevant Files\n")
+	b.WriteString(formatSectionList(fileList, "No file paths captured."))
 	return b.String()
+}
+
+func looksLikeInstruction(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"must", "should", "need to", "don't", "do not", "禁止", "不要", "必须", "请", "先", "然后",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatSectionList(items []string, fallback string) string {
+	if len(items) == 0 {
+		if strings.TrimSpace(fallback) == "" {
+			return ""
+		}
+		return "- " + fallback
+	}
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		lines = append(lines, "- "+item)
+	}
+	if len(lines) == 0 {
+		if strings.TrimSpace(fallback) == "" {
+			return ""
+		}
+		return "- " + fallback
+	}
+	return strings.Join(lines, "\n")
 }
 
 func mapKeys(m map[string]struct{}, limit int) []string {

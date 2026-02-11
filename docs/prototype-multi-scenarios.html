@@ -100,6 +100,7 @@
     <a href="#todos">Todos</a>
     <a href="#mode">模式切换</a>
     <a href="#approval">审批 Ask</a>
+    <a href="#esc-cancel">Esc 取消</a>
     <a href="#shell">Shell !</a>
     <a href="#slash">内建命令</a>
     <a href="#verify">自动验证</a>
@@ -256,19 +257,35 @@
 
   <!-- 9. 审批 Ask -->
   <section class="scene" id="approval">
-    <div class="scene-title">9. 审批 Ask — 策略 ask 时打印命令与说明，REPL 读一行 y/n/always</div>
+    <div class="scene-title">9. 审批 Ask — 策略 ask 时打印命令与说明，Esc=全局取消</div>
     <div class="term">
 <span class="tool-name">[tool] bash</span> command=rm -rf ./tmp_cache
 <span class="sys">[approval] 需要确认后执行 (bash · ask):</span>
 <span class="sys">  rm -rf ./tmp_cache</span>
-<span class="sys">  (y=本次放行 / n=拒绝 / always=始终同意该命令)</span>
-<span class="sys">context: 1600 tokens · model: gpt-4o</span>
-<span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">y</span>
-<span class="tool-ok">[tool] bash ok · exit_code=0 · 45ms</span>
-
-<span class="assistant">已删除 ./tmp_cache。</span>
+<span class="sys">  (y=本次放行 / n=拒绝 / always=始终同意该命令 / Esc=全局取消)</span>
+<span class="sys">允许执行？(y/N/always, Esc=cancel): </span><span class="user">[Esc]</span>
+<span class="sys">Cancelled by ESC</span>
+<span class="sys">Stopped model stream and tool execution; todo state remains unchanged unless a tool had already completed.</span>
 
 <span class="sys">context: 1650 tokens · model: gpt-4o</span>
+<span class="prompt">[default] /Users/dev/myapp&gt; </span>
+    </div>
+  </section>
+
+  <!-- 9.5 Esc 取消 -->
+  <section class="scene" id="esc-cancel">
+    <div class="scene-title">9.5 Esc 取消 — 运行态一键全停并把主动权返回给用户</div>
+    <div class="term">
+<span class="sys">context: 1400 tokens · model: gpt-4o</span>
+<span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">请持续流式输出并继续执行所有后续工具</span>
+
+<span class="assistant">正在生成第一段结果...</span>
+<span class="tool-name">[tool] bash</span> command=go test ./...
+<span class="user">[Esc]</span>
+<span class="sys">Cancelled by ESC</span>
+<span class="sys">Stopped model stream and tool execution; todo state remains unchanged unless a tool had already completed.</span>
+
+<span class="sys">context: 1450 tokens · model: gpt-4o</span>
 <span class="prompt">[default] /Users/dev/myapp&gt; </span>
     </div>
   </section>
@@ -302,18 +319,49 @@ drwxr-x  3 dev  staff   96 Feb 10 09:00 ..
 
   <!-- 11. 内建命令 -->
   <section class="scene" id="slash">
-    <div class="scene-title">11. 内建命令 — /help、/model、/tools、/todos、/new、/diff、/undo 等</div>
+    <div class="scene-title">11. 内建命令 — /help、/model、/tools、/todos、/new、/resume、/sessions、/diff、/undo 等</div>
     <div class="term">
 <span class="sys">context: 100 tokens · model: gpt-4o</span>
 <span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">/help</span>
 
-<span class="assistant">命令：/help /model /permissions /mode(/plan|/default|/auto-edit|/yolo) /tools /skills /todos /new /resume /compact /diff /undo
-多行输入：Enter 换行，Ctrl+D 发送。流式中断：Ctrl+C。</span>
+<span class="assistant">Commands:
+  /help
+  /model &lt;name&gt;
+  /permissions [preset]
+  /mode &lt;plan|default|auto-edit|yolo&gt;
+  /plan
+  /default
+  /auto-edit
+  /yolo
+  /tools
+  /skills
+  /todos
+  /new
+  /resume [session-id]
+  /sessions
+  /compact
+  /diff
+  /undo</span>
+
+<span class="assistant">Input (TTY):
+  Enter = send
+  multi-line via paste ([copy N lines] then Enter)
+  Ctrl+D = ignored
+  Esc = clear current input line</span>
 
 <span class="sys">context: 380 tokens · model: gpt-4o</span>
 <span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">/tools</span>
 
 <span class="assistant">当前可用工具：read, write, list, glob, grep, patch, bash, todoread, todowrite, skill, task</span>
+
+<span class="sys">context: 430 tokens · model: gpt-4o</span>
+<span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">/resume</span>
+
+<span class="assistant">Recent sessions (timezone: Asia/Shanghai, UTC+08:00):
+  * sess_20260211_223001  model=qwen3-coder-30b-a3b-instruct  agent=build  updated=2026-02-12 06:30:01 UTC+08:00
+    sess_20260211_214512  model=gpt-4o-mini  agent=build  updated=2026-02-12 05:46:09 UTC+08:00
+    sess_20260210_193944  model=gpt-4o  agent=explore  updated=2026-02-11 04:11:27 UTC+08:00
+Use /resume &lt;session-id&gt; to restore.</span>
 
 <span class="sys">context: 520 tokens · model: gpt-4o</span>
 <span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">/model gpt-4o-mini</span>
@@ -390,7 +438,7 @@ drwxr-x  3 dev  staff   96 Feb 10 09:00 ..
 
   <!-- 14. 多行输入 -->
   <section class="scene" id="multiline">
-    <div class="scene-title">14. 多行输入 — Enter 换行，Ctrl+D 发送</div>
+    <div class="scene-title">14. 多行输入 — Bracketed Paste + Enter 发送；Esc 可清空当前输入</div>
     <div class="term">
 <span class="sys">context: 150 tokens · model: gpt-4o</span>
 <span class="prompt">[default] /Users/dev/myapp&gt; </span><span class="user">请做三件事：

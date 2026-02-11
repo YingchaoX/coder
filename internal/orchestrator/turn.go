@@ -11,12 +11,20 @@ import (
 
 	"coder/internal/chat"
 	"coder/internal/contextmgr"
+	"coder/internal/permission"
+	"coder/internal/tools"
 )
 
 func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Writer) (string, error) {
+	undoRecorder := newTurnUndoRecorder(o.workspaceRoot)
+	defer o.commitTurnUndo(undoRecorder)
+
 	o.appendMessage(chat.Message{Role: "user", Content: userInput})
 	o.emitContextUpdate()
 	o.refreshTodos(ctx)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
 	var finalText string
 	turnEditedCode := false
@@ -31,9 +39,15 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 
 	if requireTodoFirst {
 		o.ensureSessionTodos(ctx, userInput, out)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 	}
 
 	for step := 0; step < o.resolveMaxSteps(); step++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		o.maybeCompact()
 		o.emitContextUpdate()
 
@@ -70,6 +84,15 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 
 		resp, err := o.chatWithRetry(ctx, o.buildProviderMessages(), o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled), onTextChunk, onReasoningChunk)
 		if err != nil {
+			if streamed {
+				streamRenderer.Finish()
+			}
+			if streamedThinking {
+				thinkingRenderer.Finish()
+			}
+			if isContextCancellationErr(ctx, err) {
+				return "", contextErrOr(ctx, err)
+			}
 			return "", fmt.Errorf("provider chat: %w", err)
 		}
 		if streamed {
@@ -112,6 +135,9 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 						}
 					}
 					if err != nil {
+						if isContextCancellationErr(ctx, err) {
+							return "", contextErrOr(ctx, err)
+						}
 						verifyWarn := fmt.Sprintf("Auto verification could not complete (%v). Continue with best-effort manual validation.", err)
 						o.appendMessage(chat.Message{Role: "assistant", Content: verifyWarn})
 						_ = o.flushSessionToFile(ctx)
@@ -123,6 +149,9 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 		}
 
 		for _, call := range resp.ToolCalls {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 			startSummary := formatToolStart(call.Function.Name, call.Function.Arguments)
 			if out != nil {
 				renderToolStart(out, startSummary)
@@ -140,9 +169,22 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			}
 
 			args := json.RawMessage(call.Function.Arguments)
-			if denied := o.handlePolicyCheck(ctx, call, args, out); denied {
+			decision := permission.Result{Decision: permission.DecisionAllow}
+			if o.policy != nil {
+				decision = o.policy.Decide(call.Function.Name, args)
+			}
+			if decision.Decision == permission.DecisionDeny {
+				reason := strings.TrimSpace(decision.Reason)
+				if reason == "" {
+					reason = "blocked by policy"
+				}
+				if out != nil {
+					renderToolBlocked(out, summarizeForLog(reason))
+				}
+				o.appendToolDenied(call, reason)
 				continue
 			}
+
 			approvalReq, err := o.registry.ApprovalRequest(call.Function.Name, args)
 			if err != nil {
 				if out != nil {
@@ -151,7 +193,20 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				o.appendToolError(call, fmt.Errorf("approval check: %w", err))
 				continue
 			}
-			if approvalReq != nil {
+			needsApproval := decision.Decision == permission.DecisionAsk || approvalReq != nil
+			if needsApproval {
+				reasons := make([]string, 0, 2)
+				if decision.Decision == permission.DecisionAsk {
+					if r := strings.TrimSpace(decision.Reason); r != "" {
+						reasons = append(reasons, r)
+					}
+				}
+				if approvalReq != nil {
+					if r := strings.TrimSpace(approvalReq.Reason); r != "" {
+						reasons = append(reasons, r)
+					}
+				}
+				approvalReason := joinApprovalReasons(reasons)
 				if o.onApproval == nil {
 					if out != nil {
 						renderToolBlocked(out, "approval callback unavailable")
@@ -159,21 +214,37 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 					o.appendToolDenied(call, "approval callback unavailable")
 					continue
 				}
-				allowed, err := o.onApproval(ctx, *approvalReq)
+				allowed, err := o.onApproval(ctx, tools.ApprovalRequest{
+					Tool:    call.Function.Name,
+					Reason:  approvalReason,
+					RawArgs: string(args),
+				})
 				if err != nil {
+					if isContextCancellationErr(ctx, err) {
+						return "", contextErrOr(ctx, err)
+					}
 					return "", fmt.Errorf("approval callback: %w", err)
 				}
 				if !allowed {
-					if out != nil {
-						renderToolBlocked(out, summarizeForLog(approvalReq.Reason))
+					if err := ctx.Err(); err != nil {
+						return "", err
 					}
-					o.appendToolDenied(call, approvalReq.Reason)
+					if out != nil {
+						renderToolBlocked(out, summarizeForLog(approvalReason))
+					}
+					o.appendToolDenied(call, approvalReason)
 					continue
 				}
+			}
+			if call.Function.Name == "write" || call.Function.Name == "edit" || call.Function.Name == "patch" {
+				undoRecorder.CaptureFromToolCall(call.Function.Name, args)
 			}
 
 			result, err := o.registry.Execute(ctx, call.Function.Name, args)
 			if err != nil {
+				if isContextCancellationErr(ctx, err) {
+					return "", contextErrOr(ctx, err)
+				}
 				if out != nil {
 					renderToolError(out, summarizeForLog(err.Error()))
 				}
@@ -209,7 +280,33 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			}
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	return finalText, fmt.Errorf("step limit reached (%d)", o.resolveMaxSteps())
+}
+
+func joinApprovalReasons(reasons []string) string {
+	if len(reasons) == 0 {
+		return "approval required"
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(reasons))
+	for _, raw := range reasons {
+		reason := strings.TrimSpace(raw)
+		if reason == "" {
+			continue
+		}
+		if _, ok := seen[reason]; ok {
+			continue
+		}
+		seen[reason] = struct{}{}
+		out = append(out, reason)
+	}
+	if len(out) == 0 {
+		return "approval required"
+	}
+	return strings.Join(out, "; ")
 }
 
 func (o *Orchestrator) maybeCompact() {

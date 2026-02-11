@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"coder/internal/chat"
 	"coder/internal/security"
@@ -54,33 +53,14 @@ func (t *PatchTool) Execute(_ context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("patch args: %w", err)
 	}
 	if strings.TrimSpace(in.Patch) == "" {
-		debugPatchLog("H0", "empty patch input", "internal/tools/patch.go:Execute", map[string]any{
-			"rawLength": len(in.Patch),
-		})
 		return "", fmt.Errorf("patch content is empty")
 	}
-
-	// Log basic info about incoming patch to debug issues like "no file patch found".
-	hasHeader := strings.Contains(in.Patch, "--- ")
-	snippet := in.Patch
-	if len(snippet) > 500 {
-		snippet = snippet[:500]
-	}
-	debugPatchLog("H0", "patch input summary", "internal/tools/patch.go:Execute", map[string]any{
-		"rawLength": len(in.Patch),
-		"hasHeader": hasHeader,
-		"snippet":   snippet,
-	})
 
 	files, err := parseUnifiedDiff(in.Patch)
 	if err != nil {
 		return "", err
 	}
 	if len(files) == 0 {
-		debugPatchLog("H0", "no file patch found after parse", "internal/tools/patch.go:Execute", map[string]any{
-			"rawLength": len(in.Patch),
-			"hasHeader": hasHeader,
-		})
 		return "", fmt.Errorf("no file patch found: expected lines starting with '--- a/<path>' and '+++ b/<path>' before any @@ hunk headers")
 	}
 
@@ -121,30 +101,6 @@ type diffLine struct {
 }
 
 var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
-
-// #region agent log
-func debugPatchLog(hypothesisID, message, location string, data map[string]any) {
-	f, err := os.OpenFile("/Users/xiongyingchao/Documents/github/coder/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return
-	}
-	payload := map[string]any{
-		"id":           fmt.Sprintf("log_%d", time.Now().UnixNano()),
-		"timestamp":    time.Now().UnixMilli(),
-		"location":     location,
-		"message":      message,
-		"data":         data,
-		"runId":        "pre-fix",
-		"hypothesisId": hypothesisID,
-	}
-	b, err := json.Marshal(payload)
-	if err == nil {
-		_, _ = f.Write(append(b, '\n'))
-	}
-	_ = f.Close()
-}
-
-// #endregion
 
 func parseUnifiedDiff(patch string) ([]diffFile, error) {
 	lines := splitKeepNewline(strings.ReplaceAll(patch, "\r\n", "\n"))
@@ -227,14 +183,6 @@ func parseHunk(lines []string) (diffHunk, int, error) {
 			// as best-effort context and let applyHunks verify them against the
 			// actual file content. This keeps the patch engine robust while still
 			// rejecting truly incompatible hunks at the context-checking stage.
-			debugPatchLog("H1", "invalid hunk line soft-recovered", "internal/tools/patch.go:parseHunk", map[string]any{
-				"line":     line,
-				"trimmed":  strings.TrimSpace(line),
-				"header":   strings.TrimSpace(lines[0]),
-				"index":    consumed,
-				"hasLF":    strings.HasSuffix(line, "\n"),
-				"lenBytes": len(line),
-			})
 			h.Lines = append(h.Lines, diffLine{Kind: ' ', Content: line})
 			consumed++
 			continue
@@ -359,27 +307,11 @@ func applyHunks(original string, hunks []diffHunk) (string, error) {
 					// tool more tolerant of small whitespace/layout drifts (for example,
 					// when the model assumes an extra blank line before a heading).
 					if isBlankDiffContent(line.Content) {
-						debugPatchLog("H5", "soft-blank context ignored", "internal/tools/patch.go:applyHunks", map[string]any{
-							"hunkOldStart": h.OldStart,
-							"hunkNewStart": h.NewStart,
-							"lineIndex":    lineIdx,
-							"origIndex":    idx,
-							"origLine":     lineFromSlice(origLines, idx),
-							"ctxLine":      line.Content,
-						})
 						// We intentionally do NOT advance idx here so that the next
 						// non-blank context line still aligns with the original file.
 						// This preserves semantics while allowing minor whitespace drift.
 						break
 					}
-					debugPatchLog("H2", "context mismatch", "internal/tools/patch.go:applyHunks", map[string]any{
-						"hunkOldStart": h.OldStart,
-						"hunkNewStart": h.NewStart,
-						"lineIndex":    lineIdx,
-						"origIndex":    idx,
-						"origLine":     lineFromSlice(origLines, idx),
-						"ctxLine":      line.Content,
-					})
 					return "", fmt.Errorf(
 						"context mismatch at hunk (old_start=%d, new_start=%d, line_index=%d, orig_index=%d): expected context line %q, but file has %q",
 						h.OldStart,
@@ -394,14 +326,6 @@ func applyHunks(original string, hunks []diffHunk) (string, error) {
 				idx++
 			case '-':
 				if idx >= len(origLines) || origLines[idx] != line.Content {
-					debugPatchLog("H3", "remove mismatch", "internal/tools/patch.go:applyHunks", map[string]any{
-						"hunkOldStart": h.OldStart,
-						"hunkNewStart": h.NewStart,
-						"lineIndex":    lineIdx,
-						"origIndex":    idx,
-						"origLine":     lineFromSlice(origLines, idx),
-						"removeLine":   line.Content,
-					})
 					return "", fmt.Errorf(
 						"remove mismatch at hunk (old_start=%d, new_start=%d, line_index=%d, orig_index=%d): patch wants to remove %q, but file has %q",
 						h.OldStart,
@@ -416,13 +340,6 @@ func applyHunks(original string, hunks []diffHunk) (string, error) {
 			case '+':
 				out = append(out, line.Content)
 			default:
-				debugPatchLog("H4", "unsupported diff line kind", "internal/tools/patch.go:applyHunks", map[string]any{
-					"hunkOldStart": h.OldStart,
-					"hunkNewStart": h.NewStart,
-					"lineIndex":    lineIdx,
-					"kind":         string(line.Kind),
-					"content":      line.Content,
-				})
 				return "", fmt.Errorf("unsupported diff line kind")
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
 	"coder/internal/bootstrap"
@@ -16,9 +17,10 @@ import (
 
 // ANSI colors for prompt (per doc 09)
 const (
-	ansiReset = "\x1b[0m"
-	ansiDim   = "\x1b[90m"
-	ansiGreen = "\x1b[32m"
+	ansiReset  = "\x1b[0m"
+	ansiDim    = "\x1b[90m"
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
 )
 
 // Loop holds REPL state: orchestrator, prompt info, and input history.
@@ -38,7 +40,6 @@ func NewLoop(res *bootstrap.BuildResult) *Loop {
 }
 
 // Run runs the REPL: two-line prompt, read input, RunInput(ctx, text, os.Stdout).
-// Ctrl+C is handled by the terminal (exit); interrupt of streaming is not yet implemented.
 func Run(loop *Loop) error {
 	orch := loop.Orch
 	if orch == nil {
@@ -93,7 +94,42 @@ func Run(loop *Loop) error {
 			loop.history = loop.history[1:]
 		}
 
-		_, err = orch.RunInput(ctx, text, stdout)
+		runCtx := ctx
+		runOut := io.Writer(stdout)
+		var (
+			turnCancel context.CancelFunc
+			rtCtrl     *runtimeController
+		)
+		if isTTY {
+			runOut = newTerminalOutputWriter(stdout)
+			runCtx, turnCancel = context.WithCancel(context.Background())
+			rtCtrl, err = newRuntimeController(stdinFd, os.Stdin, runOut, turnCancel)
+			if err != nil {
+				if turnCancel != nil {
+					turnCancel()
+				}
+				return err
+			}
+			runCtx = bootstrap.WithApprovalPrompter(runCtx, rtCtrl)
+		}
+
+		_, err = orch.RunInput(runCtx, text, runOut)
+		if turnCancel != nil {
+			turnCancel()
+		}
+		if rtCtrl != nil {
+			closeErr := rtCtrl.Close()
+			if closeErr != nil && err == nil {
+				err = closeErr
+			}
+			if rtCtrl.Interrupted() {
+				return errInterrupt
+			}
+			if rtCtrl.CancelledByESC() {
+				printEscCancelled(stdout)
+				continue
+			}
+		}
 		if err != nil {
 			fmt.Fprintf(stdout, "\n%serror: %v%s\n", ansiRed, err, ansiReset)
 		}
@@ -223,6 +259,15 @@ func readInputRaw(stdinFd int, stdin *os.File, out io.Writer) (string, error) {
 				pendingPaste = ""
 				continue
 			}
+			// Bare ESC in input mode clears current line.
+			if rd.Buffered() == 0 {
+				current := buf.String()
+				if current != "" {
+					buf.Reset()
+					clearEchoedInput(out, current)
+				}
+				continue
+			}
 			next, err := rd.ReadByte()
 			if err != nil {
 				buf.WriteByte(b)
@@ -230,9 +275,16 @@ func readInputRaw(stdinFd int, stdin *os.File, out io.Writer) (string, error) {
 				return buf.String(), err
 			}
 			if next != '[' {
-				buf.WriteByte(b)
-				buf.WriteByte(next)
-				_, _ = out.Write([]byte{b, next})
+				current := buf.String()
+				if current != "" {
+					buf.Reset()
+					clearEchoedInput(out, current)
+				}
+				// Keep the follow-up keypress (if printable) as the first char after clearing.
+				if next >= 0x20 && next <= 0x7e {
+					buf.WriteByte(next)
+					_, _ = out.Write([]byte{next})
+				}
 				continue
 			}
 			// Read CSI until final byte (letter or ~)
@@ -363,4 +415,31 @@ func useColor() bool {
 		return false
 	}
 	return strings.ToLower(strings.TrimSpace(os.Getenv("TERM"))) != "dumb"
+}
+
+func clearEchoedInput(out io.Writer, line string) {
+	if out == nil || line == "" {
+		return
+	}
+	width := runewidth.StringWidth(line)
+	if width <= 0 {
+		width = len([]rune(line))
+	}
+	for i := 0; i < width; i++ {
+		_, _ = out.Write([]byte{'\b', ' ', '\b'})
+	}
+}
+
+func printEscCancelled(out io.Writer) {
+	if out == nil {
+		return
+	}
+	_, _ = fmt.Fprintln(out)
+	msg := "Cancelled by ESC"
+	if useColor() {
+		_, _ = fmt.Fprintf(out, "%s%s%s\n", ansiYellow, msg, ansiReset)
+	} else {
+		_, _ = fmt.Fprintln(out, msg)
+	}
+	_, _ = fmt.Fprintln(out, "Stopped model stream and tool execution; todo state remains unchanged unless a tool had already completed.")
 }

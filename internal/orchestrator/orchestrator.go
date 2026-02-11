@@ -43,6 +43,8 @@ type Orchestrator struct {
 	store             storage.Store // for /new, /resume, /model
 	sessionIDRef      *string       // mutable current session ID
 	configBasePath    string        // for /model persist
+	lastSyncedMsgN    int
+	undoStack         []turnUndoEntry
 }
 
 func New(providerClient provider.Provider, registry *tools.Registry, opts Options) *Orchestrator {
@@ -109,6 +111,8 @@ func (o *Orchestrator) Reset() {
 	o.messages = o.messages[:0]
 	o.messageTimestamps = o.messageTimestamps[:0]
 	o.lastCompaction = ""
+	o.lastSyncedMsgN = 0
+	o.undoStack = o.undoStack[:0]
 }
 
 func (o *Orchestrator) Messages() []chat.Message {
@@ -118,6 +122,8 @@ func (o *Orchestrator) Messages() []chat.Message {
 func (o *Orchestrator) LoadMessages(messages []chat.Message) {
 	o.messages = append([]chat.Message(nil), messages...)
 	o.messageTimestamps = make([]string, len(o.messages))
+	o.lastSyncedMsgN = len(o.messages)
+	o.undoStack = o.undoStack[:0]
 }
 
 // appendMessage 追加一条新的对话消息，并记录时间戳（UTC RFC3339）。

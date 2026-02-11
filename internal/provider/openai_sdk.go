@@ -21,10 +21,11 @@ import (
 // OpenAIProvider 使用 go-openai SDK 的 Provider 实现
 // OpenAIProvider implements Provider using the go-openai SDK
 type OpenAIProvider struct {
-	client *openai.Client
-	model  string
-	cfg    OpenAIConfig
-	mu     sync.RWMutex
+	client     *openai.Client
+	httpClient *http.Client
+	model      string
+	cfg        OpenAIConfig
+	mu         sync.RWMutex
 }
 
 // OpenAIConfig SDK provider 配置
@@ -43,10 +44,12 @@ type OpenAIConfig struct {
 func NewOpenAIProvider(cfg OpenAIConfig) *OpenAIProvider {
 	config := openai.DefaultConfig(cfg.APIKey)
 	config.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+
+	httpClient := &http.Client{}
 	if cfg.TimeoutMS > 0 {
-		// 注意: SDK 内部处理超时，这里不设置 HTTP 超时
-		// Note: timeout for the HTTP client is handled differently for streaming
+		httpClient.Timeout = time.Duration(cfg.TimeoutMS) * time.Millisecond
 	}
+	config.HTTPClient = httpClient
 
 	client := openai.NewClientWithConfig(config)
 	if cfg.MaxRetries <= 0 {
@@ -54,9 +57,10 @@ func NewOpenAIProvider(cfg OpenAIConfig) *OpenAIProvider {
 	}
 
 	return &OpenAIProvider{
-		client: client,
-		model:  cfg.Model,
-		cfg:    cfg,
+		client:     client,
+		httpClient: httpClient,
+		model:      cfg.Model,
+		cfg:        cfg,
 	}
 }
 
@@ -213,7 +217,10 @@ func (p *OpenAIProvider) chatStreamCompat(ctx context.Context, req compatChatReq
 		httpReq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(p.cfg.APIKey))
 	}
 
-	client := &http.Client{}
+	client := p.httpClient
+	if client == nil {
+		client = &http.Client{}
+	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("http do: %w", err)

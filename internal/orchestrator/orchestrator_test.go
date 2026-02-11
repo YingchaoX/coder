@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"coder/internal/chat"
 	"coder/internal/config"
 	"coder/internal/contextmgr"
+	"coder/internal/provider"
+	"coder/internal/storage"
 	"coder/internal/tools"
 )
 
@@ -36,6 +39,55 @@ func (m mockTool) Definition() chat.ToolDef {
 
 func (m mockTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
 	return m.result, nil
+}
+
+type scriptedProvider struct {
+	model     string
+	responses []provider.ChatResponse
+	callCount int
+}
+
+func (p *scriptedProvider) Chat(_ context.Context, _ provider.ChatRequest, _ *provider.StreamCallbacks) (provider.ChatResponse, error) {
+	if p.callCount >= len(p.responses) {
+		return provider.ChatResponse{}, errors.New("no scripted response")
+	}
+	resp := p.responses[p.callCount]
+	p.callCount++
+	return resp, nil
+}
+
+func (p *scriptedProvider) ListModels(context.Context) ([]provider.ModelInfo, error) { return nil, nil }
+func (p *scriptedProvider) Name() string                                             { return "scripted" }
+func (p *scriptedProvider) CurrentModel() string                                     { return p.model }
+func (p *scriptedProvider) SetModel(model string) error {
+	p.model = model
+	return nil
+}
+
+type cancelAwareTool struct {
+	name   string
+	cancel context.CancelFunc
+}
+
+func (t *cancelAwareTool) Name() string { return t.name }
+
+func (t *cancelAwareTool) Definition() chat.ToolDef {
+	return chat.ToolDef{
+		Type: "function",
+		Function: chat.ToolFunction{
+			Name:       t.name,
+			Parameters: map[string]any{"type": "object"},
+		},
+	}
+}
+
+func (t *cancelAwareTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	if t.cancel != nil {
+		t.cancel()
+		t.cancel = nil
+	}
+	<-ctx.Done()
+	return "", ctx.Err()
 }
 
 func TestFormatToolStart(t *testing.T) {
@@ -194,6 +246,51 @@ func TestRunInputBangBypassesProviderAndPersistsContext(t *testing.T) {
 	}
 	if orch.messages[1].Role != "assistant" || !strings.Contains(orch.messages[1].Content, "hello") {
 		t.Fatalf("unexpected assistant message: %+v", orch.messages[1])
+	}
+}
+
+func TestRunTurnStopsImmediatelyOnToolContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tool := &cancelAwareTool{name: "bash", cancel: cancel}
+	registry := tools.NewRegistry(tool)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{
+				ToolCalls: []chat.ToolCall{
+					{
+						ID:   "call_1",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "bash",
+							Arguments: `{"command":"echo test"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	orch := New(prov, registry, Options{
+		MaxSteps: 4,
+		ActiveAgent: agent.Profile{
+			Name: "build",
+			ToolEnabled: map[string]bool{
+				"bash": true,
+			},
+		},
+	})
+
+	_, err := orch.RunTurn(ctx, "run command", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled, got: %v", err)
+	}
+	if prov.callCount != 1 {
+		t.Fatalf("expected single provider call, got %d", prov.callCount)
+	}
+	for _, msg := range orch.messages {
+		if msg.Role == "tool" {
+			t.Fatalf("expected no tool message appended after cancellation, found: %+v", msg)
+		}
 	}
 }
 
@@ -423,7 +520,7 @@ func TestRunInputSlashCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunInput /help failed: %v", err)
 	}
-	if !strings.Contains(got, "Available") && !strings.Contains(got, "help") {
+	if !strings.Contains(got, "Commands:") || !strings.Contains(got, "\n  /help\n") || !strings.Contains(got, "\n  /resume [session-id]\n") {
 		t.Fatalf("unexpected /help output: %q", got)
 	}
 
@@ -433,6 +530,46 @@ func TestRunInputSlashCommand(t *testing.T) {
 	}
 	if !strings.Contains(got2, "Unknown") && !strings.Contains(got2, "unknown") {
 		t.Fatalf("unexpected /unknown output: %q", got2)
+	}
+}
+
+func TestRunInputResumeWithoutArgsListsSessions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	s1 := storage.SessionMeta{ID: "sess_a", Agent: "build", Model: "m1", CWD: "/tmp/a"}
+	s2 := storage.SessionMeta{ID: "sess_b", Agent: "explore", Model: "m2", CWD: "/tmp/b"}
+	if err := store.CreateSession(s1); err != nil {
+		t.Fatalf("create session s1: %v", err)
+	}
+	if err := store.CreateSession(s2); err != nil {
+		t.Fatalf("create session s2: %v", err)
+	}
+
+	current := "sess_b"
+	orch := New(nil, tools.NewRegistry(), Options{
+		Store:        store,
+		SessionIDRef: &current,
+	})
+
+	got, err := orch.RunInput(context.Background(), "/resume", nil)
+	if err != nil {
+		t.Fatalf("RunInput /resume failed: %v", err)
+	}
+	for _, needle := range []string{"Recent sessions (timezone: Asia/Shanghai, UTC+08:00):", "sess_a", "sess_b", "Use /resume <session-id> to restore."} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("expected %q in output: %q", needle, got)
+		}
+	}
+	if !strings.Contains(got, "UTC+08:00") {
+		t.Fatalf("expected beijing timezone marker in output: %q", got)
+	}
+	if !strings.Contains(got, "* sess_b") {
+		t.Fatalf("expected current session marker for sess_b: %q", got)
 	}
 }
 

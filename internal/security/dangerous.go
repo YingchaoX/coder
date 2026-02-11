@@ -3,11 +3,24 @@ package security
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
 var dangerousCmdPattern = regexp.MustCompile(`(^|[\s;&|()])(rm|mv|chmod|chown|dd|mkfs|shutdown|reboot)([\s;&|()]|$)`)
+var shellSegmentPattern = regexp.MustCompile(`&&|\|\||[|;\n]`)
+
+var dangerousCommands = map[string]struct{}{
+	"rm":       {},
+	"mv":       {},
+	"chmod":    {},
+	"chown":    {},
+	"dd":       {},
+	"mkfs":     {},
+	"shutdown": {},
+	"reboot":   {},
+}
 
 type CommandRisk struct {
 	RequireApproval bool
@@ -34,7 +47,7 @@ func AnalyzeCommand(command string) CommandRisk {
 		}
 	}
 
-	if dangerousCmdPattern.MatchString(trimmed) {
+	if hasDangerousCommand(trimmed) {
 		return CommandRisk{
 			RequireApproval: true,
 			Reason:          "matches dangerous command policy",
@@ -97,4 +110,50 @@ func parseShellWords(input string) ([]string, error) {
 
 func isSpace(r rune) bool {
 	return r == ' ' || r == '\t' || r == '\n'
+}
+
+func hasDangerousCommand(command string) bool {
+	segments := shellSegmentPattern.Split(command, -1)
+	for _, raw := range segments {
+		words, err := parseShellWords(raw)
+		if err != nil {
+			continue
+		}
+		name := firstCommandName(words)
+		if _, ok := dangerousCommands[name]; ok {
+			return true
+		}
+	}
+	// Keep regex fallback for edge cases (for example malformed but still executable shell fragments).
+	return dangerousCmdPattern.MatchString(command)
+}
+
+func firstCommandName(words []string) string {
+	if len(words) == 0 {
+		return ""
+	}
+	i := 0
+	for i < len(words) {
+		w := strings.TrimSpace(words[i])
+		if w == "" {
+			i++
+			continue
+		}
+		// Skip leading env assignments like KEY=VALUE.
+		if strings.Contains(w, "=") && !strings.Contains(w, "/") {
+			i++
+			continue
+		}
+		// Skip common wrappers so "sudo rm -rf" still resolves to rm.
+		switch strings.ToLower(w) {
+		case "sudo", "env", "command", "builtin", "time", "nohup":
+			i++
+			continue
+		}
+		if strings.ContainsRune(w, '/') {
+			w = strings.TrimSpace(filepath.Base(w))
+		}
+		return strings.ToLower(w)
+	}
+	return ""
 }

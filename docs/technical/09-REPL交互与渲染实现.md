@@ -52,8 +52,11 @@
 未列出的输出（如文件列表、命令 stdout 原文）使用默认前景色。若终端不支持多色，至少区分：正文（默认）、错误/失败（红或高亮）、提示符（绿或高亮）。
 
 ## 6. 交互与中断
-- **Ctrl+C**：中断流式输出；也可退出程序。
-- 不保证 Esc 行为。
+- **Ctrl+C**：进程级中断（退出程序）。
+- **Esc（输入编辑态）**：清空当前输入框，不提交。
+- **Esc（运行态）**：业务级全局取消，停止当前模型流式输出、tool-call、审批等待和自动重试链路，并打印统一提示：
+  - `Cancelled by ESC`
+  - `Stopped model stream and tool execution; todo state remains unchanged unless a tool had already completed.`
 - 界面极简：使用终端默认样式（等宽字体、少颜色、少装饰）。
 
 ## 7. 状态与按需查看
@@ -63,8 +66,9 @@
 
 ## 8. 审批交互
 - 触发场景：仅当**模型触发工具调用**且策略层或工具层判定为 `ask` 时（例如模型调用 `bash` 执行命令），命令模式 `!` 不走此交互链。
-- 策略层 `ask`（如 `bash policy requires approval`）：在 stdout 打印待执行命令与说明，从 REPL 读一行（y/n/always）后继续；`always` 表示将该命令记录到项目级 allowlist，后续相同命令在策略层自动放行。
-- 工具层危险命令风险审批（如 `matches dangerous command policy`）：在 stdout 打印命令与说明，仅接受 y/n，始终不提供 `always`。
+- 策略层 `ask`（如 `bash policy requires approval`）：在 stdout 打印待执行命令与说明，从 REPL 读审批输入（y/n/always）后继续；`always` 表示将该命令记录到项目级 allowlist，后续相同命令在策略层自动放行。
+- 工具层危险命令风险审批（如 `matches dangerous command policy`）：在 stdout 打印命令与说明，仅接受 y/n（不提供 `always`）。
+- 审批等待期间按 `Esc`：触发全局取消（等价 Cancel 整条自动化流程），不是 `N`。
 - 非交互模式（`auto_approve_ask=true` 或 `approval.interactive=false`）：不阻塞，自动放行策略层 `ask`，但危险命令风险审批仍需显式 y/n 或按配置拒绝执行。
 
 ## 9. 状态同步（Orchestrator 驱动）

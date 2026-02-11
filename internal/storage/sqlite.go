@@ -225,31 +225,9 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []chat.Message) er
 		return fmt.Errorf("delete old messages: %w", err)
 	}
 
-	stmt, err := tx.Prepare(`
-		INSERT INTO messages (session_id, seq, role, content, name, tool_call_id, tool_calls, reasoning, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("prepare insert: %w", err)
-	}
-	defer stmt.Close()
-
 	now := nowUTC()
-	for i, msg := range messages {
-		toolCallsJSON := "[]"
-		if len(msg.ToolCalls) > 0 {
-			data, marshalErr := json.Marshal(msg.ToolCalls)
-			if marshalErr == nil {
-				toolCallsJSON = string(data)
-			}
-		}
-		reasoning := ""
-		if msg.Reasoning != "" {
-			reasoning = msg.Reasoning
-		}
-		if _, err := stmt.Exec(sessionID, i, msg.Role, msg.Content, msg.Name,
-			msg.ToolCallID, toolCallsJSON, reasoning, now); err != nil {
-			return fmt.Errorf("insert message %d: %w", i, err)
-		}
+	if err := insertMessagesTx(tx, sessionID, 0, messages, now); err != nil {
+		return err
 	}
 
 	// 更新 session 时间戳 / Update session timestamp
@@ -258,6 +236,53 @@ func (s *SQLiteStore) SaveMessages(sessionID string, messages []chat.Message) er
 	}
 
 	return tx.Commit()
+}
+
+func (s *SQLiteStore) AppendMessages(sessionID string, startSeq int, messages []chat.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := nowUTC()
+	if err := insertMessagesTx(tx, sessionID, startSeq, messages, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE sessions SET updated_at=? WHERE id=?", now, sessionID); err != nil {
+		return fmt.Errorf("update session timestamp: %w", err)
+	}
+	return tx.Commit()
+}
+
+func insertMessagesTx(tx *sql.Tx, sessionID string, startSeq int, messages []chat.Message, createdAt string) error {
+	stmt, err := tx.Prepare(`
+		INSERT INTO messages (session_id, seq, role, content, name, tool_call_id, tool_calls, reasoning, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for i, msg := range messages {
+		toolCallsJSON := "[]"
+		if len(msg.ToolCalls) > 0 {
+			data, marshalErr := json.Marshal(msg.ToolCalls)
+			if marshalErr == nil {
+				toolCallsJSON = string(data)
+			}
+		}
+		reasoning := msg.Reasoning
+		seq := startSeq + i
+		if _, err := stmt.Exec(sessionID, seq, msg.Role, msg.Content, msg.Name,
+			msg.ToolCallID, toolCallsJSON, reasoning, createdAt); err != nil {
+			return fmt.Errorf("insert message %d: %w", seq, err)
+		}
+	}
+	return nil
 }
 
 func (s *SQLiteStore) LoadMessages(sessionID string) ([]chat.Message, error) {

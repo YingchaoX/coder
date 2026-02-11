@@ -71,7 +71,7 @@ flowchart TD
 ## 5. 核心模块设计
 ### 5.1 REPL（`internal/repl`）
 - 双行提示符渲染（context/model 与 mode/cwd）。
-- TTY raw 输入、多行粘贴识别、Ctrl+C 中断。
+- TTY raw 输入、多行粘贴识别、Esc 清空输入、Esc 运行态全局取消、Ctrl+C 进程中断。
 - 非 TTY 模式按 EOF 聚合输入。
 
 ### 5.2 Orchestrator（`internal/orchestrator`）

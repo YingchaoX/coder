@@ -122,8 +122,6 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 	registry := tools.NewRegistry(toolList...)
 
 	approveFn := func(ctx context.Context, req tools.ApprovalRequest) (bool, error) {
-		_ = ctx
-
 		isTTY := term.IsTerminal(int(os.Stdin.Fd()))
 		isBash := strings.EqualFold(strings.TrimSpace(req.Tool), "bash")
 		reason := strings.TrimSpace(req.Reason)
@@ -158,6 +156,35 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 			// 仅策略层 ask 走 auto_approve_ask；危险命令一律不在此路径放行。
 			if cfg.Approval.AutoApproveAsk || isPolicyAsk {
 				return true, nil
+			}
+		}
+
+		if prompter, ok := approvalPrompterFromContext(ctx); ok {
+			decision, err := prompter.PromptApproval(ctx, req, ApprovalPromptOptions{
+				AllowAlways: !isDangerous,
+				BashCommand: bashCommand,
+			})
+			if err != nil {
+				return false, err
+			}
+			switch decision {
+			case ApprovalDecisionAllowOnce:
+				return true, nil
+			case ApprovalDecisionAllowAlways:
+				if !isDangerous && isBash && bashCommand != "" {
+					name := config.NormalizeCommandName(bashCommand)
+					if name != "" {
+						if policy.AddToCommandAllowlist(name) {
+							_ = config.WriteCommandAllowlist(ws.Root(), name)
+						}
+					}
+				}
+				if isDangerous {
+					return true, nil
+				}
+				return true, nil
+			default:
+				return false, nil
 			}
 		}
 
