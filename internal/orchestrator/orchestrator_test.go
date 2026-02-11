@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"coder/internal/chat"
+	"coder/internal/provider"
 	"coder/internal/tools"
 )
 
@@ -156,6 +157,26 @@ func TestParseBangCommand(t *testing.T) {
 	}
 }
 
+func TestParseSlashCommand(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantName string
+		wantArgs string
+		ok       bool
+	}{
+		{input: "/help", wantName: "help", wantArgs: "", ok: true},
+		{input: " /model gpt-4.1 ", wantName: "model", wantArgs: "gpt-4.1", ok: true},
+		{input: "/", wantName: "", wantArgs: "", ok: true},
+		{input: "hello", wantName: "", wantArgs: "", ok: false},
+	}
+	for _, tc := range tests {
+		name, args, ok := parseSlashCommand(tc.input)
+		if name != tc.wantName || args != tc.wantArgs || ok != tc.ok {
+			t.Fatalf("parseSlashCommand(%q)=(%q,%q,%v), want (%q,%q,%v)", tc.input, name, args, ok, tc.wantName, tc.wantArgs, tc.ok)
+		}
+	}
+}
+
 func TestFormatBangCommandResult(t *testing.T) {
 	got := formatBangCommandResult("echo hello", `{"ok":true,"exit_code":0,"duration_ms":7,"stdout":"hello\n","stderr":"","truncated":false}`)
 	for _, needle := range []string{"[command mode]", "$ echo hello", "exit=0", "hello"} {
@@ -205,6 +226,79 @@ func TestRunInputBangDeniedPersistsResult(t *testing.T) {
 	}
 	if orch.messages[1].Role != "assistant" || !strings.Contains(orch.messages[1].Content, "command mode denied") {
 		t.Fatalf("unexpected assistant message: %+v", orch.messages[1])
+	}
+}
+
+type stubProvider struct {
+	model     string
+	responses []provider.ChatResponse
+	err       error
+	lastReq   provider.ChatRequest
+}
+
+func (s *stubProvider) Chat(_ context.Context, req provider.ChatRequest, _ *provider.StreamCallbacks) (provider.ChatResponse, error) {
+	s.lastReq = req
+	if s.err != nil {
+		return provider.ChatResponse{}, s.err
+	}
+	if len(s.responses) == 0 {
+		return provider.ChatResponse{}, nil
+	}
+	resp := s.responses[0]
+	s.responses = s.responses[1:]
+	return resp, nil
+}
+
+func (s *stubProvider) ListModels(_ context.Context) ([]provider.ModelInfo, error) { return nil, nil }
+func (s *stubProvider) Name() string                                               { return "stub" }
+func (s *stubProvider) CurrentModel() string                                       { return s.model }
+func (s *stubProvider) SetModel(model string) error                                { s.model = model; return nil }
+
+func TestRunInputSlashModelAndHelp(t *testing.T) {
+	provider := &stubProvider{model: "gpt-4o-mini"}
+	orch := New(provider, tools.NewRegistry(), Options{})
+
+	got, err := orch.RunInput(context.Background(), "/model gpt-4.1", nil)
+	if err != nil {
+		t.Fatalf("RunInput /model failed: %v", err)
+	}
+	if !strings.Contains(got, "gpt-4.1") {
+		t.Fatalf("unexpected /model output: %q", got)
+	}
+	if provider.CurrentModel() != "gpt-4.1" {
+		t.Fatalf("model not changed: %q", provider.CurrentModel())
+	}
+
+	got, err = orch.RunInput(context.Background(), "/help", nil)
+	if err != nil {
+		t.Fatalf("RunInput /help failed: %v", err)
+	}
+	if !strings.Contains(got, "/compact") {
+		t.Fatalf("unexpected /help output: %q", got)
+	}
+	if len(orch.messages) != 4 {
+		t.Fatalf("unexpected message count: %d", len(orch.messages))
+	}
+}
+
+func TestRunInputSlashCompactAndUnknown(t *testing.T) {
+	orch := New(nil, tools.NewRegistry(), Options{})
+	orch.LoadMessages([]chat.Message{{Role: "user", Content: "a"}, {Role: "assistant", Content: "b"}})
+
+	got, err := orch.RunInput(context.Background(), "/compact", nil)
+	if err != nil {
+		t.Fatalf("RunInput /compact failed: %v", err)
+	}
+	if !strings.Contains(got, "Context") {
+		t.Fatalf("unexpected /compact output: %q", got)
+	}
+
+	got, err = orch.RunInput(context.Background(), "/what", nil)
+	if err != nil {
+		t.Fatalf("RunInput /what failed: %v", err)
+	}
+	if !strings.Contains(got, "Unknown command") {
+		t.Fatalf("unexpected unknown output: %q", got)
 	}
 }
 
@@ -332,5 +426,56 @@ func TestShouldAutoVerifyEditedPaths(t *testing.T) {
 	}
 	if !shouldAutoVerifyEditedPaths([]string{"docs/USAGE.md", "internal/orchestrator/orchestrator.go"}) {
 		t.Fatalf("expected true when at least one non-doc path is edited")
+	}
+}
+
+func TestRunTurnExecutesToolThenReturnsFinalText(t *testing.T) {
+	prov := &stubProvider{
+		model: "gpt-test",
+		responses: []provider.ChatResponse{
+			{
+				Content: "",
+				ToolCalls: []chat.ToolCall{{
+					ID:   "call_1",
+					Type: "function",
+					Function: chat.ToolCallFunction{
+						Name:      "read",
+						Arguments: `{"path":"README.md"}`,
+					},
+				}},
+			},
+			{Content: "done"},
+		},
+	}
+	registry := tools.NewRegistry(mockTool{name: "read", result: `{"ok":true,"path":"README.md","content":"x"}`})
+	orch := New(prov, registry, Options{})
+
+	got, err := orch.RunTurn(context.Background(), "summarize", nil)
+	if err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if got != "done" {
+		t.Fatalf("unexpected result: %q", got)
+	}
+	if len(orch.messages) != 4 {
+		t.Fatalf("unexpected messages len: %d", len(orch.messages))
+	}
+}
+
+func TestRunTurnStepLimitReached(t *testing.T) {
+	prov := &stubProvider{
+		responses: []provider.ChatResponse{{
+			ToolCalls: []chat.ToolCall{{
+				ID:       "call_1",
+				Type:     "function",
+				Function: chat.ToolCallFunction{Name: "read", Arguments: `{}`},
+			}},
+		}},
+	}
+	registry := tools.NewRegistry(mockTool{name: "read", result: `{"ok":true}`})
+	orch := New(prov, registry, Options{MaxSteps: 1})
+	_, err := orch.RunTurn(context.Background(), "loop", nil)
+	if err == nil || !strings.Contains(err.Error(), "step limit reached") {
+		t.Fatalf("expected step limit error, got: %v", err)
 	}
 }

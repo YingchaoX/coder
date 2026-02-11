@@ -207,10 +207,50 @@ func (o *Orchestrator) CompactNow() bool {
 
 func (o *Orchestrator) RunInput(ctx context.Context, input string, out io.Writer) (string, error) {
 	command, ok := parseBangCommand(input)
-	if !ok {
-		return o.RunTurn(ctx, input, out)
+	if ok {
+		return o.runBangCommand(ctx, input, command, out)
 	}
-	return o.runBangCommand(ctx, input, command, out)
+	name, args, ok := parseSlashCommand(input)
+	if ok {
+		return o.runSlashCommand(input, name, args, out)
+	}
+	return o.RunTurn(ctx, input, out)
+}
+
+func (o *Orchestrator) runSlashCommand(rawInput, name, args string, out io.Writer) (string, error) {
+	o.messages = append(o.messages, chat.Message{Role: "user", Content: rawInput})
+
+	var msg string
+	switch name {
+	case "help":
+		msg = "Available commands: /help /model <name> /permissions /new /resume <id> /compact /diff /review /undo"
+	case "model":
+		model := strings.TrimSpace(args)
+		if model == "" {
+			msg = fmt.Sprintf("Current model: %s", quoteOrDash(o.CurrentModel()))
+			break
+		}
+		if err := o.SetModel(model); err != nil {
+			return "", err
+		}
+		msg = fmt.Sprintf("Model switched to %s", quoteOrDash(model))
+	case "compact":
+		if o.CompactNow() {
+			msg = fmt.Sprintf("Context compacted: %s", o.LastCompactionSummary())
+		} else {
+			msg = "Context compaction skipped: no eligible messages."
+		}
+	case "permissions", "new", "resume", "diff", "review", "undo":
+		msg = fmt.Sprintf("/%s is recognized but not available in this runtime yet.", name)
+	default:
+		msg = fmt.Sprintf("Unknown command: /%s", name)
+	}
+
+	o.messages = append(o.messages, chat.Message{Role: "assistant", Content: msg})
+	if out != nil {
+		renderAssistantBlock(out, msg, true)
+	}
+	return msg, nil
 }
 
 func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Writer) (string, error) {
@@ -1234,6 +1274,24 @@ func parseBangCommand(input string) (string, bool) {
 	}
 	command := strings.TrimSpace(strings.TrimPrefix(trimmed, "!"))
 	return command, true
+}
+
+func parseSlashCommand(input string) (string, string, bool) {
+	trimmed := strings.TrimSpace(input)
+	if !strings.HasPrefix(trimmed, "/") {
+		return "", "", false
+	}
+	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "/"))
+	if payload == "" {
+		return "", "", true
+	}
+	parts := strings.Fields(payload)
+	name := strings.ToLower(strings.TrimSpace(parts[0]))
+	args := ""
+	if len(parts) > 1 {
+		args = strings.TrimSpace(strings.TrimPrefix(payload, parts[0]))
+	}
+	return name, args, true
 }
 
 func formatBangCommandResult(command, rawResult string) string {
