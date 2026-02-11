@@ -98,6 +98,7 @@ cd coder
 ```
 
 - **构建二进制**
+2026-02-11
 
 ```bash
 go build -o coder ./cmd/agent
@@ -128,7 +129,7 @@ go build -o coder ./cmd/agent
 {
   "provider": {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "model": "qwen2.5-coder-32b-instruct",
+    "model": "qwen3-coder-30b-a3b-instruct",
     "api_key": "YOUR_API_KEY"
   },
   "runtime": {

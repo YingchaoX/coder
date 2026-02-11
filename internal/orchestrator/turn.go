@@ -15,9 +15,6 @@ import (
 
 func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Writer) (string, error) {
 	o.appendMessage(chat.Message{Role: "user", Content: userInput})
-	defer func() {
-		_ = o.flushSessionToFile(ctx)
-	}()
 	o.emitContextUpdate()
 	o.refreshTodos(ctx)
 
@@ -84,6 +81,7 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 
 		assistantMsg := chat.Message{Role: "assistant", Content: resp.Content, Reasoning: resp.Reasoning, ToolCalls: resp.ToolCalls}
 		o.appendMessage(assistantMsg)
+		_ = o.flushSessionToFile(ctx)
 
 		if resp.Reasoning != "" && out != nil && !streamedThinking {
 			renderThinkingBlock(out, resp.Reasoning)
@@ -110,11 +108,13 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 						if !retryable {
 							verifyWarn := fmt.Sprintf("Auto verification command `%s` failed due to environment/runtime issues. Continue with best-effort manual validation.", command)
 							o.appendMessage(chat.Message{Role: "assistant", Content: verifyWarn})
+							_ = o.flushSessionToFile(ctx)
 						}
 					}
 					if err != nil {
 						verifyWarn := fmt.Sprintf("Auto verification could not complete (%v). Continue with best-effort manual validation.", err)
 						o.appendMessage(chat.Message{Role: "assistant", Content: verifyWarn})
+						_ = o.flushSessionToFile(ctx)
 					}
 				}
 			}

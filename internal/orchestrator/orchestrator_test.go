@@ -46,7 +46,8 @@ func TestFormatToolStart(t *testing.T) {
 		want string
 	}{
 		{name: "grep", tool: "grep", args: `{"pattern":"Home","path":"."}`, want: `* Grep "Home" in "."`},
-		{name: "read", tool: "read", args: `{"path":"README.md"}`, want: `* Read "README.md"`},
+		{name: "read path only", tool: "read", args: `{"path":"README.md"}`, want: `* Read "README.md"`},
+		{name: "read with range", tool: "read", args: `{"path":"README.md","offset":1,"limit":100}`, want: `* Read "README.md"[1-100]`},
 		{name: "write", tool: "write", args: `{"path":"a.txt","content":"hello"}`, want: `* Write "a.txt" (5 bytes)`},
 		{name: "bash", tool: "bash", args: `{"command":"ls -la"}`, want: `* Bash "ls -la"`},
 	}
@@ -68,7 +69,7 @@ func TestSummarizeToolResult(t *testing.T) {
 		matches []string
 	}{
 		{name: "grep count", tool: "grep", result: `{"ok":true,"count":18,"matches":[]}`, matches: []string{"18", "matches"}},
-		{name: "read bytes", tool: "read", result: `{"ok":true,"path":"README.md","content":"abc"}`, matches: []string{"3 bytes", `"README.md"`}},
+		{name: "read bytes with range", tool: "read", result: `{"ok":true,"path":"README.md","content":"abc","start_line":1,"end_line":3,"has_more":false}`, matches: []string{"3 bytes", `"README.md"`, "[1-3]"}},
 		{name: "bash ok", tool: "bash", result: `{"ok":true,"exit_code":0,"duration_ms":12,"stdout":"done\n","stderr":""}`, matches: []string{"exit=0", "12ms", "done"}},
 		{name: "bash fail", tool: "bash", result: `{"ok":false,"exit_code":1,"duration_ms":6,"stdout":"","stderr":"oops"}`, matches: []string{"exit=1", "oops"}},
 		{name: "todo checklist", tool: "todoread", result: `{"ok":true,"count":2,"items":[{"content":"step1","status":"in_progress"},{"content":"step2","status":"completed"}]}`, matches: []string{"todo items=2", "[~] step1", "[x] step2"}},
@@ -348,6 +349,37 @@ func TestShouldAutoVerifyEditedPaths(t *testing.T) {
 	}
 	if !shouldAutoVerifyEditedPaths([]string{"docs/USAGE.md", "internal/orchestrator/orchestrator.go"}) {
 		t.Fatalf("expected true when at least one non-doc path is edited")
+	}
+}
+
+func TestEditedPathFromToolCallWrite(t *testing.T) {
+	args := mustJSON(map[string]any{
+		"path":    "internal/tools/read.go",
+		"content": "test",
+	})
+	got := editedPathFromToolCall("write", json.RawMessage(args))
+	if got != "internal/tools/read.go" {
+		t.Fatalf("editedPathFromToolCall(write) = %q, want %q", got, "internal/tools/read.go")
+	}
+}
+
+func TestEditedPathFromToolCallPatchMarkdown(t *testing.T) {
+	patch := `--- a/README.md
++++ b/README.md
+@@ -1,3 +1,4 @@
+ line1
+ line2
+ line3
+`
+	args := mustJSON(map[string]any{
+		"patch": patch,
+	})
+	got := editedPathFromToolCall("patch", json.RawMessage(args))
+	if got != "README.md" {
+		t.Fatalf("editedPathFromToolCall(patch) = %q, want %q", got, "README.md")
+	}
+	if shouldAutoVerifyEditedPaths([]string{got}) {
+		t.Fatalf("expected docs-only patch edits to skip auto-verify")
 	}
 }
 

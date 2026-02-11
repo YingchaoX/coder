@@ -30,6 +30,7 @@ func (o *Orchestrator) runBangCommand(ctx context.Context, rawInput, command str
 	if strings.TrimSpace(command) == "" {
 		msg := "command mode error: empty command after '!'."
 		o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+		_ = o.flushSessionToFile(ctx)
 		if out != nil {
 			renderToolError(out, msg)
 		}
@@ -38,6 +39,7 @@ func (o *Orchestrator) runBangCommand(ctx context.Context, rawInput, command str
 	if !o.isToolAllowed("bash") {
 		msg := fmt.Sprintf("command mode denied: bash disabled by active agent %s", o.activeAgent.Name)
 		o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+		_ = o.flushSessionToFile(ctx)
 		if out != nil {
 			renderToolBlocked(out, msg)
 		}
@@ -62,6 +64,7 @@ func (o *Orchestrator) runBangCommand(ctx context.Context, rawInput, command str
 
 	msg := formatBangCommandResult(command, result)
 	o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+	_ = o.flushSessionToFile(ctx)
 	if out != nil {
 		renderCommandBlock(out, msg)
 	}

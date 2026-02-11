@@ -153,8 +153,8 @@ func Default() Config {
 	return Config{
 		Provider: ProviderConfig{
 			BaseURL:   "https://dashscope.aliyuncs.com/compatible-mode/v1",
-			Model:     "qwen2.5-coder-32b-instruct",
-			Models:    []string{"qwen2.5-coder-32b-instruct"},
+			Model:     "qwen3-coder-30b-a3b-instruct",
+			Models:    []string{"qwen3-coder-30b-a3b-instruct"},
 			TimeoutMS: 120000,
 		},
 		Runtime: RuntimeConfig{

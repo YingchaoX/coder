@@ -108,6 +108,7 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 	toolList := []tools.Tool{
 		tools.NewReadTool(ws),
 		tools.NewWriteTool(ws),
+		tools.NewEditTool(ws),
 		tools.NewListTool(ws),
 		tools.NewGlobTool(ws),
 		tools.NewGrepTool(ws),

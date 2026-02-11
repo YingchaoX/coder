@@ -64,16 +64,54 @@ func (o *Orchestrator) runAutoVerify(ctx context.Context, command string, attemp
 }
 
 func editedPathFromToolCall(tool string, args json.RawMessage) string {
-	if strings.TrimSpace(tool) != "write" {
-		return ""
+	switch strings.TrimSpace(tool) {
+	case "write":
+		var payload struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(args, &payload); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(payload.Path)
+	case "patch":
+		// Best-effort extraction of the first patched file path from unified diff.
+		// Format we expect (same as internal/tools/patch.go):
+		//   --- a/old/path
+		//   +++ b/new/path
+		var payload struct {
+			Patch string `json:"patch"`
+		}
+		if err := json.Unmarshal(args, &payload); err != nil {
+			return ""
+		}
+		patch := strings.TrimSpace(payload.Patch)
+		if patch == "" {
+			return ""
+		}
+		lines := strings.Split(patch, "\n")
+		for _, raw := range lines {
+			line := strings.TrimSpace(raw)
+			if !strings.HasPrefix(line, "+++") {
+				continue
+			}
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "+++"))
+			if rest == "" || rest == "/dev/null" {
+				continue
+			}
+			if idx := strings.IndexAny(rest, "\t "); idx >= 0 {
+				rest = rest[:idx]
+			}
+			rest = strings.TrimSpace(rest)
+			rest = strings.TrimPrefix(rest, "a/")
+			rest = strings.TrimPrefix(rest, "b/")
+			rest = filepath.ToSlash(strings.TrimSpace(rest))
+			if rest == "" || rest == "/dev/null" {
+				continue
+			}
+			return rest
+		}
 	}
-	var payload struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(args, &payload); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(payload.Path)
+	return ""
 }
 
 func shouldAutoVerifyEditedPaths(paths []string) bool {

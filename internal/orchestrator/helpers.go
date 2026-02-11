@@ -95,6 +95,14 @@ func formatToolStart(name string, rawArgs string) string {
 	switch name {
 	case "read":
 		path := getString(args, "path", "")
+		offset := getInt(args, "offset", 0)
+		limit := getInt(args, "limit", 0)
+		// 仅当调用方显式传入 offset/limit 时，在起始行中展示行区间。
+		// Only show line range when caller explicitly provides offset/limit.
+		if offset > 0 && limit > 0 {
+			end := offset + limit - 1
+			return fmt.Sprintf("* Read %s[%d-%d]", quoteOrDash(path), offset, end)
+		}
 		return fmt.Sprintf("* Read %s", quoteOrDash(path))
 	case "list":
 		path := getString(args, "path", ".")
@@ -110,6 +118,9 @@ func formatToolStart(name string, rawArgs string) string {
 		path := getString(args, "path", "")
 		content := getString(args, "content", "")
 		return fmt.Sprintf("* Write %s (%d bytes)", quoteOrDash(path), len(content))
+	case "edit":
+		path := getString(args, "path", "")
+		return fmt.Sprintf("* Edit %s", quoteOrDash(path))
 	case "patch":
 		return "* Apply patch"
 	case "todoread":
@@ -147,7 +158,20 @@ func summarizeToolResult(name string, rawResult string) string {
 	case "read":
 		path := getString(result, "path", "")
 		content := getString(result, "content", "")
-		return fmt.Sprintf("read %d bytes from %s", len(content), quoteOrDash(path))
+		start := getInt(result, "start_line", 0)
+		end := getInt(result, "end_line", 0)
+		hasMore := false
+		if v, ok := result["has_more"].(bool); ok {
+			hasMore = v
+		}
+		base := fmt.Sprintf("read %d bytes from %s", len(content), quoteOrDash(path))
+		if start > 0 && end >= start {
+			if hasMore {
+				return fmt.Sprintf("%s [%d-%d] (more lines)", base, start, end)
+			}
+			return fmt.Sprintf("%s [%d-%d]", base, start, end)
+		}
+		return base
 	case "list":
 		path := getString(result, "path", "")
 		return fmt.Sprintf("%d entries in %s", len(getArray(result, "items")), quoteOrDash(path))
@@ -171,6 +195,25 @@ func summarizeToolResult(name string, rawResult string) string {
 			line = fmt.Sprintf("updated %s (+%d -%d lines, %d bytes)", quoteOrDash(path), additions, deletions, size)
 		case "unchanged":
 			line = fmt.Sprintf("no-op write to %s (%d bytes)", quoteOrDash(path), size)
+		}
+		if diff != "" {
+			return line + "\n" + diff
+		}
+		return line
+	case "edit":
+		path := getString(result, "path", "")
+		size := getInt(result, "size", 0)
+		operation := strings.ToLower(strings.TrimSpace(getString(result, "operation", "")))
+		additions := getInt(result, "additions", 0)
+		deletions := getInt(result, "deletions", 0)
+		diff := strings.TrimSpace(getString(result, "diff", ""))
+		replacements := getInt(result, "replacements", 0)
+		line := fmt.Sprintf("edited %s (%d bytes, %d replacement(s))", quoteOrDash(path), size, replacements)
+		switch operation {
+		case "updated":
+			line = fmt.Sprintf("updated %s (+%d -%d lines, %d bytes, %d replacement(s))", quoteOrDash(path), additions, deletions, size, replacements)
+		case "unchanged":
+			line = fmt.Sprintf("no-op edit to %s (%d bytes, %d replacement(s))", quoteOrDash(path), size, replacements)
 		}
 		if diff != "" {
 			return line + "\n" + diff

@@ -29,7 +29,7 @@ func (t *WriteTool) Definition() chat.ToolDef {
 		Type: "function",
 		Function: chat.ToolFunction{
 			Name:        t.Name(),
-			Description: "Write full content to a file in workspace",
+			Description: "Write full content to a file in workspace. This is expensive and should be used mainly for creating new files or completely replacing existing files, not for small localized edits or appending a single line.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
