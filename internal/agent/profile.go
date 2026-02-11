@@ -29,6 +29,7 @@ func Builtins() map[string]Profile {
 		ToolEnabled: defaultToolSet(true),
 	}
 	plan.ToolEnabled["write"] = false
+	plan.ToolEnabled["edit"] = false
 	plan.ToolEnabled["patch"] = false
 
 	general := Profile{
@@ -50,6 +51,7 @@ func Builtins() map[string]Profile {
 			"skill":     true,
 			"todoread":  true,
 			"todowrite": false,
+			"edit":      false,
 			"write":     false,
 			"patch":     false,
 			"bash":      false,
@@ -129,6 +131,7 @@ func parseToolDecision(raw string) bool {
 func defaultToolSet(v bool) map[string]bool {
 	return map[string]bool{
 		"read":      v,
+		"edit":      v,
 		"write":     v,
 		"list":      v,
 		"glob":      v,

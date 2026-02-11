@@ -363,6 +363,18 @@ func TestEditedPathFromToolCallWrite(t *testing.T) {
 	}
 }
 
+func TestEditedPathFromToolCallEdit(t *testing.T) {
+	args := mustJSON(map[string]any{
+		"path":       "internal/tools/read.go",
+		"old_string": "a",
+		"new_string": "b",
+	})
+	got := editedPathFromToolCall("edit", json.RawMessage(args))
+	if got != "internal/tools/read.go" {
+		t.Fatalf("editedPathFromToolCall(edit) = %q, want %q", got, "internal/tools/read.go")
+	}
+}
+
 func TestEditedPathFromToolCallPatchMarkdown(t *testing.T) {
 	patch := `--- a/README.md
 +++ b/README.md

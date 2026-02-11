@@ -50,6 +50,7 @@ type PermissionConfig struct {
 	DefaultWildcard string            `json:"*"`
 	Default         string            `json:"default"`
 	Read            string            `json:"read"`
+	Edit            string            `json:"edit"`
 	Write           string            `json:"write"`
 	List            string            `json:"list"`
 	Glob            string            `json:"glob"`
@@ -178,6 +179,7 @@ func Default() Config {
 		Permission: PermissionConfig{
 			DefaultWildcard: "ask",
 			Read:            "allow",
+			Edit:            "ask",
 			List:            "allow",
 			Glob:            "allow",
 			Grep:            "allow",
@@ -422,6 +424,9 @@ func mergePermission(base PermissionConfig, override PermissionConfig) Permissio
 	}
 	if strings.TrimSpace(override.Read) != "" {
 		base.Read = override.Read
+	}
+	if strings.TrimSpace(override.Edit) != "" {
+		base.Edit = override.Edit
 	}
 	if strings.TrimSpace(override.Write) != "" {
 		base.Write = override.Write

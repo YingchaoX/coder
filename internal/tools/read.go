@@ -42,7 +42,7 @@ func (t *ReadTool) Definition() chat.ToolDef {
 					},
 					"limit": map[string]any{
 						"type":        "integer",
-						"description": "Max number of lines to read. Defaults to 100 and is capped at 200.",
+						"description": "Max number of lines to read. Defaults to 50 and is capped at 200.",
 					},
 				},
 				"required": []string{"path"},

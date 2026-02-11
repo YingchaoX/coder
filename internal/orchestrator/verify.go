@@ -73,6 +73,14 @@ func editedPathFromToolCall(tool string, args json.RawMessage) string {
 			return ""
 		}
 		return strings.TrimSpace(payload.Path)
+	case "edit":
+		var payload struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(args, &payload); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(payload.Path)
 	case "patch":
 		// Best-effort extraction of the first patched file path from unified diff.
 		// Format we expect (same as internal/tools/patch.go):

@@ -201,7 +201,7 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 					}
 				}
 			}
-			if call.Function.Name == "write" || call.Function.Name == "patch" {
+			if call.Function.Name == "write" || call.Function.Name == "edit" || call.Function.Name == "patch" {
 				turnEditedCode = true
 				if editedPath := editedPathFromToolCall(call.Function.Name, args); editedPath != "" {
 					editedPaths = append(editedPaths, editedPath)

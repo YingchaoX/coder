@@ -11,6 +11,7 @@ func TestPolicyDecide(t *testing.T) {
 	p := New(config.PermissionConfig{
 		Default:   "ask",
 		Read:      "allow",
+		Edit:      "deny",
 		Write:     "deny",
 		TodoRead:  "allow",
 		TodoWrite: "deny",
@@ -24,6 +25,9 @@ func TestPolicyDecide(t *testing.T) {
 
 	if got := p.Decide("read", nil).Decision; got != DecisionAllow {
 		t.Fatalf("read decision=%s", got)
+	}
+	if got := p.Decide("edit", nil).Decision; got != DecisionDeny {
+		t.Fatalf("edit decision=%s", got)
 	}
 	if got := p.Decide("write", nil).Decision; got != DecisionDeny {
 		t.Fatalf("write decision=%s", got)

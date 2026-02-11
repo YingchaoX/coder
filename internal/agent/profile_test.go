@@ -11,6 +11,9 @@ func TestResolveBuiltins(t *testing.T) {
 	if p.Name != "plan" {
 		t.Fatalf("name=%q", p.Name)
 	}
+	if p.ToolEnabled["edit"] {
+		t.Fatalf("plan should disable edit")
+	}
 	if p.ToolEnabled["write"] {
 		t.Fatalf("plan should disable write")
 	}

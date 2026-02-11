@@ -61,6 +61,8 @@ func (o *Orchestrator) sessionFilePath() string {
 // flushSessionToFile writes current session messages into .coder/sessions/<session_id>.json.
 // 失败时返回错误，但调用方通常应视为 best-effort，不阻断主对话流程。
 func (o *Orchestrator) flushSessionToFile(_ context.Context) error {
+	o.syncMessagesToStore()
+
 	path := o.sessionFilePath()
 	if path == "" {
 		return nil
@@ -154,4 +156,17 @@ func (o *Orchestrator) flushSessionToFile(_ context.Context) error {
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+// syncMessagesToStore keeps SQLite session messages in sync for /resume and history recovery.
+// Errors are intentionally ignored (best-effort, should not block foreground turns).
+func (o *Orchestrator) syncMessagesToStore() {
+	if o == nil || o.store == nil {
+		return
+	}
+	sid := strings.TrimSpace(o.GetCurrentSessionID())
+	if sid == "" {
+		return
+	}
+	_ = o.store.SaveMessages(sid, o.messages)
 }

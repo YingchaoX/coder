@@ -106,6 +106,8 @@ func (p *Policy) toolRule(tool string) string {
 	switch tool {
 	case "read":
 		return p.cfg.Read
+	case "edit":
+		return p.cfg.Edit
 	case "write":
 		return p.cfg.Write
 	case "list":
@@ -203,6 +205,7 @@ func (p *Policy) Summary() string {
 	parts := []string{
 		"default: " + def,
 		"read: " + p.cfg.Read,
+		"edit: " + p.cfg.Edit,
 		"write: " + p.cfg.Write,
 		"patch: " + p.cfg.Patch,
 		"todoread: " + p.cfg.TodoRead,
@@ -226,25 +229,25 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 	switch name {
 	case "strict":
 		return config.PermissionConfig{
-			Default: "deny", Read: "allow", Write: "deny", Patch: "deny",
+			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny",
 			TodoRead: "allow", TodoWrite: "deny", Skill: "deny", Task: "deny",
 			Bash: map[string]string{"*": "deny"},
 		}, true
 	case "balanced":
 		return config.PermissionConfig{
-			Default: "ask", Read: "allow", Write: "ask", Patch: "ask",
+			Default: "ask", Read: "allow", Edit: "ask", Write: "ask", Patch: "ask",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask",
 			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
 		}, true
 	case "auto-edit":
 		return config.PermissionConfig{
-			Default: "allow", Read: "allow", Write: "allow", Patch: "allow",
+			Default: "allow", Read: "allow", Edit: "allow", Write: "allow", Patch: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow",
 			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
 		}, true
 	case "yolo":
 		return config.PermissionConfig{
-			Default: "allow", Read: "allow", Write: "allow", Patch: "allow",
+			Default: "allow", Read: "allow", Edit: "allow", Write: "allow", Patch: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow",
 			Bash: map[string]string{"*": "allow"},
 		}, true
