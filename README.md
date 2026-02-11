@@ -41,7 +41,7 @@
 
 - **Skills 机制**
   - 内置 Skills 通过 `//go:embed` 打入二进制（例如 `create-skill`）。
-  - 支持从本地目录（默认 `./.skills`、`~/.offline-agent/skills`、`~/.codex/skills`）加载用户自定义 `SKILL.md`。
+  - 支持从本地目录（默认 `./.skills`、`~/.codex/skills`）加载用户自定义 `SKILL.md`。
 
 ---
 
@@ -113,19 +113,18 @@ go build -o coder ./cmd/agent
 配置由 `internal/config` 加载，默认查找顺序为：
 
 1. 全局配置（按顺序合并）：
-   - `~/.offline-agent/config.jsonc`
-   - `~/.coder/config.jsonc`
-2. 项目级配置（先由 `-config` 或环境变量覆盖路径，再由仓库根目录自动发现）：
-   - CLI：`-config /path/to/config.jsonc`
+   - `~/.coder/config.json`
+2. 项目级配置（先由 `-config` 或环境变量覆盖路径，再由仓库根目录自动发现，默认 `.coder/config.json`）：
+   - CLI：`-config /path/to/config.json`
    - 环境变量：`AGENT_CONFIG_PATH`
-   - 自动发现文件（按顺序）：`agent.config.jsonc`、`agent.config.json`、`.coder/config.jsonc`、`.coder/config.json`
+   - 自动发现文件（按顺序）：`agent.config.json`、`.coder/config.json`
 3. 环境变量覆盖：
    - `AGENT_BASE_URL`、`AGENT_MODEL`、`AGENT_API_KEY` / `DASHSCOPE_API_KEY`
    - `AGENT_WORKSPACE_ROOT`、`AGENT_MAX_STEPS`、`AGENT_CACHE_PATH`
 
-一个最小可用的项目级配置示例（`./.coder/config.jsonc`）：
+一个最小可用的项目级配置示例（`./.coder/config.json`）：
 
-```jsonc
+```json
 {
   "provider": {
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -150,7 +149,7 @@ go build -o coder ./cmd/agent
 
 - `-cwd`：覆盖工作区根路径；未指定时，优先使用配置中的 `runtime.workspace_root`，否则默认为当前工作目录。
 - `-lang`：界面语言，支持 `en` 与 `zh-CN`。
-- `-config`：可显式指定配置文件路径（JSON / JSONC）。
+- `-config`：可显式指定配置文件路径（JSON）。
 
 看到提示符类似：
 

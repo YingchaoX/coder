@@ -206,10 +206,8 @@ func Default() Config {
 			MaxVerifyAttempts:     2,
 			VerifyCommands:        nil,
 		},
-		Agent: AgentConfig{Default: "build"},
-		Skills: SkillsConfig{
-			Paths: []string{"./.skills", "~/.offline-agent/skills", "~/.codex/skills"},
-		},
+		Agent:  AgentConfig{Default: "build"},
+		Skills: SkillsConfig{Paths: []string{"./.coder/skills", "~/.coder/skills"}},
 		Storage: StorageConfig{
 			BaseDir:       "~/.coder",
 			LogMaxMB:      20,
@@ -262,17 +260,12 @@ func globalConfigPaths() []string {
 	if err != nil {
 		return nil
 	}
-	legacy := filepath.Join(home, ".offline-agent", "config.jsonc")
-	current := filepath.Join(home, ".coder", "config.jsonc")
-	// Load legacy first, then current, so current path takes precedence.
-	return []string{legacy, current}
+	current := filepath.Join(home, ".coder", "config.json")
+	return []string{current}
 }
 
 func findProjectConfigPath() string {
 	candidates := []string{
-		"agent.config.jsonc",
-		"agent.config.json",
-		".coder/config.jsonc",
 		".coder/config.json",
 	}
 	for _, c := range candidates {

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestLoadJSONCAndPrecedence(t *testing.T) {
+func TestLoadConfigAndPrecedence(t *testing.T) {
 	home := t.TempDir()
 	if err := os.Setenv("HOME", home); err != nil {
 		t.Fatal(err)
@@ -18,7 +18,7 @@ func TestLoadJSONCAndPrecedence(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldwd) })
 
-	globalDir := filepath.Join(home, ".offline-agent")
+	globalDir := filepath.Join(home, ".coder")
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -27,14 +27,14 @@ func TestLoadJSONCAndPrecedence(t *testing.T) {
   "provider": {"model": "global-model"},
   "compaction": {"auto": false}
 }`
-	if err := os.WriteFile(filepath.Join(globalDir, "config.jsonc"), []byte(globalCfg), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(globalDir, "config.json"), []byte(globalCfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	projectCfg := `{
   "provider": {"model": "project-model"},
   "compaction": {"auto": true, "prune": false}
 }`
-	if err := os.WriteFile("agent.config.jsonc", []byte(projectCfg), 0o644); err != nil {
+	if err := os.WriteFile("agent.config.json", []byte(projectCfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +82,7 @@ func TestProviderModelsNormalization(t *testing.T) {
     "models": ["m1", "m2", "m1", "  ", "m3"]
   }
 }`
-	if err := os.WriteFile("agent.config.jsonc", []byte(projectCfg), 0o644); err != nil {
+	if err := os.WriteFile("agent.config.json", []byte(projectCfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load("")
@@ -109,19 +109,11 @@ func TestLoadGlobalConfigCurrentPathOverridesLegacy(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldwd) })
 
-	legacyDir := filepath.Join(home, ".offline-agent")
-	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(legacyDir, "config.jsonc"), []byte(`{"provider":{"model":"legacy-model"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	currentDir := filepath.Join(home, ".coder")
 	if err := os.MkdirAll(currentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(currentDir, "config.jsonc"), []byte(`{"provider":{"model":"current-model"}}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(currentDir, "config.json"), []byte(`{"provider":{"model":"current-model"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

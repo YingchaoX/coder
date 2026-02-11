@@ -654,7 +654,7 @@ func TestIsCoderConfigPath(t *testing.T) {
 		want bool
 	}{
 		{path: ".coder/config.json", want: true},
-		{path: "sub/.coder/config.jsonc", want: true},
+		{path: "sub/.coder/config.json", want: true},
 		{path: "CODER/config.json", want: false},
 		{path: "", want: false},
 	}
