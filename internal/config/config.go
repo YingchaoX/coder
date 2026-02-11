@@ -266,6 +266,7 @@ func globalConfigPaths() []string {
 
 func findProjectConfigPath() string {
 	candidates := []string{
+		"agent.config.json",
 		".coder/config.json",
 	}
 	for _, c := range candidates {
