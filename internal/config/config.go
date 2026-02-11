@@ -37,6 +37,15 @@ type CompactionConfig struct {
 	RecentMessages int     `json:"recent_messages"`
 }
 
+type ApprovalConfig struct {
+	// AutoApproveAsk 控制策略层 ask 的默认行为；true 时可在非交互模式下自动放行。
+	// AutoApproveAsk controls default behavior for policy-level ask; when true, ask may be auto-approved in non-interactive mode.
+	AutoApproveAsk bool `json:"auto_approve_ask"`
+	// Interactive 决定是否启用交互式审批（在 stdout 打印命令并读取 y/n/always）。
+	// Interactive decides whether to run interactive approval (print command to stdout and read y/n/always).
+	Interactive bool `json:"interactive"`
+}
+
 type PermissionConfig struct {
 	DefaultWildcard  string            `json:"*"`
 	Default          string            `json:"default"`
@@ -52,6 +61,9 @@ type PermissionConfig struct {
 	Skill            string            `json:"skill"`
 	Task             string            `json:"task"`
 	ExternalDir      string            `json:"external_directory"`
+	// CommandAllowlist 记录“始终同意的命令”（按命令名归一化）。
+	// CommandAllowlist stores commands that have been marked as \"always allow\" (normalized by command name).
+	CommandAllowlist []string `json:"command_allowlist"`
 	InstructionFiles []string          `json:"instruction_files"`
 }
 
@@ -78,19 +90,6 @@ type AgentConfig struct {
 	Definitions []AgentDefinition `json:"definitions"`
 }
 
-type MCPServerConfig struct {
-	Name        string            `json:"name"`
-	Enabled     bool              `json:"enabled"`
-	Command     []string          `json:"command"`
-	Environment map[string]string `json:"environment"`
-	Env         map[string]string `json:"env"`
-	TimeoutMS   int               `json:"timeout_ms"`
-}
-
-type MCPConfig struct {
-	Servers []MCPServerConfig `json:"servers"`
-}
-
 type SkillsConfig struct {
 	Paths []string `json:"paths"`
 }
@@ -107,10 +106,10 @@ type Config struct {
 	Safety       SafetyConfig     `json:"safety"`
 	Compaction   CompactionConfig `json:"compaction"`
 	Workflow     WorkflowConfig   `json:"workflow"`
+	Approval     ApprovalConfig   `json:"approval"`
 	Permission   PermissionConfig `json:"permission"`
 	Agent        AgentConfig      `json:"agent"`
 	Agents       AgentConfig      `json:"agents"`
-	MCP          MCPConfig        `json:"mcp"`
 	Skills       SkillsConfig     `json:"skills"`
 	Instructions []string         `json:"instructions"`
 	Storage      StorageConfig    `json:"storage"`
@@ -130,16 +129,21 @@ type fileWorkflowConfig struct {
 	VerifyCommands        *[]string `json:"verify_commands"`
 }
 
+type fileApprovalConfig struct {
+	AutoApproveAsk *bool `json:"auto_approve_ask"`
+	Interactive    *bool `json:"interactive"`
+}
+
 type fileConfig struct {
 	Provider     *ProviderConfig       `json:"provider"`
 	Runtime      *RuntimeConfig        `json:"runtime"`
 	Safety       *SafetyConfig         `json:"safety"`
 	Compaction   *fileCompactionConfig `json:"compaction"`
 	Workflow     *fileWorkflowConfig   `json:"workflow"`
+	Approval     *fileApprovalConfig   `json:"approval"`
 	Permission   *PermissionConfig     `json:"permission"`
 	Agent        *AgentConfig          `json:"agent"`
 	Agents       *AgentConfig          `json:"agents"`
-	MCP          *MCPConfig            `json:"mcp"`
 	Skills       *SkillsConfig         `json:"skills"`
 	Instructions *[]string             `json:"instructions"`
 	Storage      *StorageConfig        `json:"storage"`
@@ -166,6 +170,10 @@ func Default() Config {
 			Prune:          true,
 			Threshold:      0.8,
 			RecentMessages: 12,
+		},
+		Approval: ApprovalConfig{
+			AutoApproveAsk: false,
+			Interactive:    true,
 		},
 		Permission: PermissionConfig{
 			DefaultWildcard: "ask",
@@ -198,8 +206,7 @@ func Default() Config {
 			MaxVerifyAttempts:     2,
 			VerifyCommands:        nil,
 		},
-		Agent: AgentConfig{Default: "build"},
-		MCP:   MCPConfig{Servers: nil},
+		Agent:  AgentConfig{Default: "build"},
 		Skills: SkillsConfig{
 			Paths: []string{"./.skills", "~/.offline-agent/skills", "~/.codex/skills"},
 		},
@@ -209,6 +216,19 @@ func Default() Config {
 			CacheTTLHours: 168,
 		},
 	}
+}
+
+// MergeAgentConfig 合并 Agent 配置：b 的 Default 覆盖 a，b 的 Definitions 追加到 a
+// MergeAgentConfig merges agent config: b.Default overrides a; b.Definitions are appended to a
+func MergeAgentConfig(a, b AgentConfig) AgentConfig {
+	out := a
+	if strings.TrimSpace(b.Default) != "" {
+		out.Default = b.Default
+	}
+	if len(b.Definitions) > 0 {
+		out.Definitions = append(out.Definitions, b.Definitions...)
+	}
+	return out
 }
 
 func Load(path string) (Config, error) {
@@ -249,7 +269,12 @@ func globalConfigPaths() []string {
 }
 
 func findProjectConfigPath() string {
-	candidates := []string{"agent.config.jsonc", "agent.config.json"}
+	candidates := []string{
+		"agent.config.jsonc",
+		"agent.config.json",
+		".coder/config.jsonc",
+		".coder/config.json",
+	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
@@ -324,6 +349,14 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 			cfg.Workflow.VerifyCommands = append([]string(nil), (*fc.Workflow.VerifyCommands)...)
 		}
 	}
+	if fc.Approval != nil {
+		if fc.Approval.AutoApproveAsk != nil {
+			cfg.Approval.AutoApproveAsk = *fc.Approval.AutoApproveAsk
+		}
+		if fc.Approval.Interactive != nil {
+			cfg.Approval.Interactive = *fc.Approval.Interactive
+		}
+	}
 	if fc.Permission != nil {
 		cfg.Permission = mergePermission(cfg.Permission, *fc.Permission)
 	}
@@ -332,9 +365,6 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	}
 	if fc.Agents != nil {
 		cfg.Agents = mergeAgents(cfg.Agents, *fc.Agents)
-	}
-	if fc.MCP != nil {
-		cfg.MCP = *fc.MCP
 	}
 	if fc.Skills != nil {
 		cfg.Skills = *fc.Skills
@@ -438,6 +468,10 @@ func mergePermission(base PermissionConfig, override PermissionConfig) Permissio
 			base.Bash[k] = v
 		}
 	}
+	if len(override.CommandAllowlist) > 0 {
+		// 覆盖式赋值，按当前文件配置为准；归一化在 normalize 中处理。
+		base.CommandAllowlist = append([]string(nil), override.CommandAllowlist...)
+	}
 	return base
 }
 
@@ -503,6 +537,12 @@ func normalize(cfg *Config) error {
 	if cfg.Compaction.RecentMessages <= 0 {
 		cfg.Compaction.RecentMessages = Default().Compaction.RecentMessages
 	}
+	// Approval defaults
+	if !cfg.Approval.Interactive && !cfg.Approval.AutoApproveAsk {
+		// 若未显式配置，保持默认：交互式审批开启，auto_approve_ask 关闭。
+		def := Default().Approval
+		cfg.Approval = def
+	}
 	if cfg.Workflow.MaxVerifyAttempts <= 0 {
 		cfg.Workflow.MaxVerifyAttempts = Default().Workflow.MaxVerifyAttempts
 	}
@@ -526,14 +566,6 @@ func normalize(cfg *Config) error {
 	if len(cfg.Skills.Paths) == 0 {
 		cfg.Skills.Paths = Default().Skills.Paths
 	}
-	for i := range cfg.MCP.Servers {
-		if len(cfg.MCP.Servers[i].Environment) == 0 && len(cfg.MCP.Servers[i].Env) > 0 {
-			cfg.MCP.Servers[i].Environment = cfg.MCP.Servers[i].Env
-		}
-		if cfg.MCP.Servers[i].TimeoutMS <= 0 {
-			cfg.MCP.Servers[i].TimeoutMS = 5000
-		}
-	}
 
 	storageDir, err := expandPath(cfg.Storage.BaseDir)
 	if err != nil {
@@ -551,6 +583,24 @@ func normalize(cfg *Config) error {
 	cfg.Permission.InstructionFiles = normalizePaths(cfg.Permission.InstructionFiles)
 	cfg.Skills.Paths = normalizePaths(cfg.Skills.Paths)
 	cfg.Runtime.WorkspaceRoot = strings.TrimSpace(cfg.Runtime.WorkspaceRoot)
+
+	// 归一化 command_allowlist：按命令名小写存储，去重。
+	if len(cfg.Permission.CommandAllowlist) > 0 {
+		seen := map[string]struct{}{}
+		norm := make([]string, 0, len(cfg.Permission.CommandAllowlist))
+		for _, raw := range cfg.Permission.CommandAllowlist {
+			name := NormalizeCommandName(raw)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			norm = append(norm, name)
+		}
+		cfg.Permission.CommandAllowlist = norm
+	}
 
 	return nil
 }
@@ -615,6 +665,33 @@ func normalizeCommandList(commands []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+// NormalizeCommandName 归一化命令名：去掉前置环境变量，取命令基名并转为小写。
+// NormalizeCommandName normalizes a shell command to its base name (lowercased), ignoring leading env assignments.
+func NormalizeCommandName(command string) string {
+	s := strings.TrimSpace(command)
+	if s == "" {
+		return ""
+	}
+	parts := strings.Fields(s)
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		// 跳过形如 KEY=VAL 的前置环境变量（不含路径分隔符）。
+		if strings.Contains(p, "=") && !strings.Contains(p, "/") {
+			continue
+		}
+		name := p
+		if strings.ContainsRune(name, '/') {
+			name = filepath.Base(name)
+		}
+		name = strings.ToLower(strings.TrimSpace(name))
+		return name
+	}
+	return ""
 }
 
 func normalizeModelList(models []string) []string {
@@ -726,4 +803,105 @@ func stripJSONComments(data []byte) []byte {
 	}
 
 	return out.Bytes()
+}
+
+// WriteProviderModel 将 provider.model 写入项目配置（./.coder/config.json）；目录不存在则创建
+// WriteProviderModel writes provider.model to project config (./.coder/config.json); creates dir if needed
+func WriteProviderModel(projectDir, model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return errors.New("model is empty")
+	}
+	dir := filepath.Join(strings.TrimSpace(projectDir), ".coder")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir .coder: %w", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	var out map[string]any
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(data, &out); err != nil {
+			out = nil
+		}
+	}
+	if out == nil {
+		out = make(map[string]any)
+	}
+	providerMap, _ := out["provider"].(map[string]any)
+	if providerMap == nil {
+		providerMap = make(map[string]any)
+	}
+	providerMap["model"] = model
+	out["provider"] = providerMap
+	data, err = json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// WriteCommandAllowlist 追加命令名到项目级 allowlist（permission.command_allowlist），目录不存在则创建。
+// WriteCommandAllowlist appends a command name to project-level permission.command_allowlist; creates .coder if needed.
+func WriteCommandAllowlist(projectDir, commandName string) error {
+	name := NormalizeCommandName(commandName)
+	if name == "" {
+		return errors.New("command name is empty")
+	}
+	dir := filepath.Join(strings.TrimSpace(projectDir), ".coder")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir .coder: %w", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	var root map[string]any
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(data, &root); err != nil {
+			root = nil
+		}
+	}
+	if root == nil {
+		root = make(map[string]any)
+	}
+	permAny, ok := root["permission"]
+	var perm map[string]any
+	if ok {
+		if m, ok2 := permAny.(map[string]any); ok2 {
+			perm = m
+		}
+	}
+	if perm == nil {
+		perm = make(map[string]any)
+	}
+	existingAny, _ := perm["command_allowlist"].([]any)
+	seen := map[string]struct{}{}
+	names := make([]string, 0, len(existingAny)+1)
+	for _, v := range existingAny {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		n := strings.ToLower(strings.TrimSpace(s))
+		if n == "" {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		names = append(names, n)
+	}
+	if _, ok := seen[name]; !ok {
+		names = append(names, name)
+	}
+	outArr := make([]any, 0, len(names))
+	for _, n := range names {
+		outArr = append(outArr, n)
+	}
+	perm["command_allowlist"] = outArr
+	root["permission"] = perm
+	data, err = json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }

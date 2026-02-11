@@ -50,26 +50,44 @@
 
 ## 6. `!` 命令分支
 - 直接调用 `bash` 工具，不发模型请求。
-- 非 `yolo` 模式仍经过策略与审批。
+- 视为用户直接在终端执行 shell：**不经过策略层与风险审批链**，仅受工作区路径等基础安全约束（详见《04-安全与权限规则》中的“命令模式 `!`”小节）。
 - 返回结构化执行结果（命令、exit code、stdout/stderr）。
 
 ## 7. `/` 命令分支
-首发全量支持：
+首发全量支持（与需求 02 子命令契约一致）：
 - `/help`
 - `/model <name>`
 - `/permissions [preset]`
+- `/mode <name>`（或 `/plan`、`/default`、`/auto-edit`、`/yolo` 等价形式）
+- `/tools`
+- `/skills`
+- `/todos`
 - `/new`
 - `/resume <session-id>`
 - `/compact`
 - `/diff`
-- `/review`
 - `/undo`
 
+子命令契约摘要：
+- `/help`：展示命令、Enter/Ctrl+D 输入规则、流式中断等说明。
+- `/model <name>`：立即切换当前会话模型，并尝试持久化到 `./.coder/config.json`。
+- `/permissions [preset]`：无参数时展示当前权限矩阵；有参数时切换权限预设（`strict`、`balanced`、`auto-edit`、`yolo`）。
+- `/mode <name>`：切换当前模式并更新提示符（或使用 `/plan`、`/default`、`/auto-edit`、`/yolo`）。
+- `/tools`：展示当前可用工具列表/摘要。
+- `/skills`：展示当前可用技能列表/摘要。
+- `/todos`：仅查看当前会话 todo 列表（只读）。
+- `/new`：创建新会话并切到空上下文输入态。
+- `/resume <session-id>`：按会话 ID 恢复历史会话；若目标不存在，返回可读错误。
+- `/compact`：强制执行一次上下文压缩并回显摘要。
+- `/diff`：展示当前工作区改动差异摘要；可展开查看详细 diff。
+- `/undo`：撤销“上一次用户输入对应整回合”产生的文件改动；仅在检测到 git 可用且当前目录是 git 仓库时允许。
+
 行为约束：
-- 未知命令返回可读错误。
+- 未知命令返回可读错误（REPL 输出到 stdout）。
 - `/model` 当前会话立即生效，并尝试写入 `./.coder/config.json`。
-- `/resume` 仅接受 `<session-id>`。
+- `/resume` 仅接受 `<session-id>`，不支持索引或别名。
 - `/undo` 运行时检测 git；无 git 或非仓库则返回不可用提示。
+- 当前版本仅支持线性会话，不支持 `/fork`。
 
 ## 8. 自动验证循环（严格白名单）
 触发条件：

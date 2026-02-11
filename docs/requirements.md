@@ -8,7 +8,7 @@
 - 你要和技术实现逐条对齐，避免“文档写了但代码没做”或“代码做了文档没写”。
 
 说明：
-- 本文档基于仓库当前实现（TUI + Orchestrator + Tools + SQLite + Skills）。
+- 本文档基于仓库当前实现（**REPL** + Orchestrator + Tools + SQLite + Skills）。
 
 ## 2. 阅读顺序（建议）
 1. `docs/requirements/00-文档范围与定位.md`

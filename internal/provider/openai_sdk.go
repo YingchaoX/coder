@@ -1,10 +1,14 @@
 package provider
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -98,27 +102,6 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest, cb *StreamCa
 		model = p.CurrentModel()
 	}
 
-	messages := convertMessages(req.Messages)
-	sdkReq := openai.ChatCompletionRequest{
-		Model:    model,
-		Messages: messages,
-		Stream:   true,
-	}
-
-	if len(req.Tools) > 0 {
-		sdkReq.Tools = convertTools(req.Tools)
-		sdkReq.ToolChoice = "auto"
-	}
-	if req.Temperature != nil {
-		sdkReq.Temperature = float32(*req.Temperature)
-	}
-	if req.TopP != nil {
-		sdkReq.TopP = float32(*req.TopP)
-	}
-	if req.MaxTokens > 0 {
-		sdkReq.MaxTokens = req.MaxTokens
-	}
-
 	var lastErr error
 	for attempt := 0; attempt <= p.cfg.MaxRetries; attempt++ {
 		if attempt > 0 {
@@ -130,7 +113,23 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest, cb *StreamCa
 			}
 		}
 
-		resp, err := p.chatStream(ctx, sdkReq, cb)
+		resp, err := p.chatStreamCompat(ctx, compatChatRequest{
+			Model:       model,
+			Messages:    req.Messages,
+			Stream:      true,
+			Tools:       req.Tools,
+			Temperature: req.Temperature,
+			TopP:        req.TopP,
+			MaxTokens:   req.MaxTokens,
+		}, cb)
+		// 兼容实现失败时，回退到 SDK 实现（主要用于非 Ollama / 特殊服务端）。
+		// Fallback to SDK stream if compat stream fails.
+		if err != nil {
+			sdkResp, sdkErr := p.chatStream(ctx, buildSDKRequest(model, req), cb)
+			if sdkErr == nil {
+				return sdkResp, nil
+			}
+		}
 		if err == nil {
 			return resp, nil
 		}
@@ -145,6 +144,228 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ChatRequest, cb *StreamCa
 		}
 	}
 	return ChatResponse{}, fmt.Errorf("provider chat failed after %d retries: %w", p.cfg.MaxRetries, lastErr)
+}
+
+// --- OpenAI-compatible streaming (compat) ---
+
+type compatChatRequest struct {
+	Model       string         `json:"model"`
+	Messages    []chat.Message `json:"messages"`
+	Stream      bool           `json:"stream"`
+	Tools       []chat.ToolDef `json:"tools,omitempty"`
+	ToolChoice  any            `json:"tool_choice,omitempty"`
+	Temperature *float64       `json:"temperature,omitempty"`
+	TopP        *float64       `json:"top_p,omitempty"`
+	MaxTokens   int            `json:"max_tokens,omitempty"`
+}
+
+type compatStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Role            string `json:"role,omitempty"`
+			Content         string `json:"content,omitempty"`
+			Reasoning       string `json:"reasoning,omitempty"`
+			ReasoningContent string `json:"reasoning_content,omitempty"`
+			ToolCalls       []struct {
+				Index    *int `json:"index,omitempty"`
+				ID       string `json:"id,omitempty"`
+				Type     string `json:"type,omitempty"`
+				Function struct {
+					Name      string `json:"name,omitempty"`
+					Arguments string `json:"arguments,omitempty"`
+				} `json:"function,omitempty"`
+			} `json:"tool_calls,omitempty"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
+	} `json:"usage,omitempty"`
+}
+
+func (p *OpenAIProvider) chatStreamCompat(ctx context.Context, req compatChatRequest, cb *StreamCallbacks) (ChatResponse, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(p.cfg.BaseURL), "/")
+	if baseURL == "" {
+		return ChatResponse{}, fmt.Errorf("base_url is empty")
+	}
+	if req.Model == "" {
+		req.Model = p.CurrentModel()
+	}
+	if len(req.Tools) > 0 && req.ToolChoice == nil {
+		req.ToolChoice = "auto"
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return ChatResponse{}, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return ChatResponse{}, fmt.Errorf("new request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if strings.TrimSpace(p.cfg.APIKey) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(p.cfg.APIKey))
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return ChatResponse{}, fmt.Errorf("http do: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return ChatResponse{}, fmt.Errorf("http status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		toolCallsByIdx   = map[int]*toolCallAccumulator{}
+		finishReason     string
+		usage            Usage
+	)
+
+	// SSE: each line begins with "data: {json}" or "data: [DONE]"
+	scanner := bufio.NewScanner(resp.Body)
+	// Increase buffer for long JSON lines.
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 8*1024*1024)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		if payload == "[DONE]" {
+			break
+		}
+
+		var chunk compatStreamChunk
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			// Some servers may interleave non-JSON lines; ignore parse errors cautiously.
+			continue
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "" {
+				finishReason = strings.TrimSpace(*choice.FinishReason)
+			}
+
+			if choice.Delta.Content != "" {
+				contentBuilder.WriteString(choice.Delta.Content)
+				if cb != nil && cb.OnTextChunk != nil {
+					cb.OnTextChunk(choice.Delta.Content)
+				}
+			}
+
+			reasoningChunk := choice.Delta.ReasoningContent
+			if reasoningChunk == "" {
+				reasoningChunk = choice.Delta.Reasoning
+			}
+			if reasoningChunk != "" {
+				reasoningBuilder.WriteString(reasoningChunk)
+				if cb != nil && cb.OnReasoningChunk != nil {
+					cb.OnReasoningChunk(reasoningChunk)
+				}
+			}
+
+			for _, tc := range choice.Delta.ToolCalls {
+				idx := 0
+				if tc.Index != nil {
+					idx = *tc.Index
+				}
+				acc, ok := toolCallsByIdx[idx]
+				if !ok {
+					acc = &toolCallAccumulator{}
+					toolCallsByIdx[idx] = acc
+				}
+				if tc.ID != "" {
+					acc.id = tc.ID
+				}
+				if tc.Type != "" {
+					acc.typ = tc.Type
+				}
+				if tc.Function.Name != "" {
+					acc.name += tc.Function.Name
+				}
+				if tc.Function.Arguments != "" {
+					acc.args.WriteString(tc.Function.Arguments)
+				}
+			}
+		}
+
+		if chunk.Usage != nil {
+			usage = Usage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}
+			if chunk.Usage.CompletionTokensDetails != nil {
+				usage.ReasoningTokens = chunk.Usage.CompletionTokensDetails.ReasoningTokens
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		// If we already have partial content or tool calls, return what we have.
+		if contentBuilder.Len() == 0 && len(toolCallsByIdx) == 0 && reasoningBuilder.Len() == 0 {
+			return ChatResponse{}, fmt.Errorf("stream scan: %w", err)
+		}
+	}
+
+	toolCalls := assembleToolCalls(toolCallsByIdx)
+	if cb != nil && cb.OnToolCall != nil {
+		for _, tc := range toolCalls {
+			cb.OnToolCall(tc)
+		}
+	}
+	if cb != nil && cb.OnUsage != nil {
+		cb.OnUsage(usage)
+	}
+
+	return ChatResponse{
+		Content:      contentBuilder.String(),
+		Reasoning:    reasoningBuilder.String(),
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		Usage:        usage,
+	}, nil
+}
+
+func buildSDKRequest(model string, req ChatRequest) openai.ChatCompletionRequest {
+	messages := convertMessages(req.Messages)
+	sdkReq := openai.ChatCompletionRequest{
+		Model:    model,
+		Messages: messages,
+		Stream:   true,
+	}
+	if len(req.Tools) > 0 {
+		sdkReq.Tools = convertTools(req.Tools)
+		sdkReq.ToolChoice = "auto"
+	}
+	if req.Temperature != nil {
+		sdkReq.Temperature = float32(*req.Temperature)
+	}
+	if req.TopP != nil {
+		sdkReq.TopP = float32(*req.TopP)
+	}
+	if req.MaxTokens > 0 {
+		sdkReq.MaxTokens = req.MaxTokens
+	}
+	return sdkReq
 }
 
 func (p *OpenAIProvider) chatStream(ctx context.Context, req openai.ChatCompletionRequest, cb *StreamCallbacks) (ChatResponse, error) {

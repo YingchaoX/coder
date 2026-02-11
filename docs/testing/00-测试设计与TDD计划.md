@@ -25,11 +25,11 @@
   - `internal/storage` >= 65%
   - `internal/provider` >= 55%
   - `internal/skills` >= 70%
-  - `internal/tui` >= 45%（以交互状态机为主，不强求渲染细节）
+  - `internal/repl` >= 45%（以读行与提示符为主）
 
 ## 4. 需求追踪测试矩阵
 - `docs/requirements/01-产品形态与界面.md`
-  - 测试项：Tab 模式轮转顺序、Enter/Shift+Enter、Esc 中断标记、状态栏含 cwd。
+  - 测试项：REPL 双行提示符、Ctrl+D 发送与 Enter 换行、非 TTY 读入行为、slash 命令输出。
 - `docs/requirements/02-交互逻辑与状态流.md`
   - 测试项：`!` 与 `/` 分支分发、普通回合工具循环、步数上限、复杂任务 todo 初始化、自动验证触发条件。
 - `docs/requirements/03-工具能力清单.md`
@@ -51,7 +51,7 @@
   - 回合终止条件：无工具调用、步数上限、provider 错误。
   - 自动验证白名单：只允许白名单命令；无命令时必须输出“未执行自动验证”。
   - 模式行为：`plan/default/auto-edit/yolo` 差异，`yolo+bash` 全放行。
-  - `/` 命令全集：`/help /model /permissions /new /resume /compact /diff /review /undo`。
+  - `/` 命令全集：`/help /model /permissions /new /resume /compact /diff /undo`。
 - Green：最小实现通过测试。
 - Refactor：抽取命令分发、自动验证选择器、模式判定函数，减少重复。
 
@@ -96,10 +96,9 @@
 - skill 发现、frontmatter 解析、重名冲突。
 - load 不存在 skill 错误路径。
 
-## 5.9 `internal/tui`（P2）
-- Update 状态机测试（键位、流式消息、工具消息、错误消息）。
-- 模式切换与状态栏信息更新。
-- 不做复杂渲染快照，仅断言关键状态与关键文案存在。
+## 5.9 `internal/repl`（P2）
+- 双行提示符格式、Ctrl+D 发送与 Enter 换行（及非 TTY 读入行为）、历史存储；slash 输出到 stdout。
+- 不依赖真实 orchestrator 的单元测试（mock 或 nil orch）。
 
 ## 6. 端到端场景用例（高价值）
 - 场景 1：普通需求 -> 工具链执行 -> 输出答案 -> 持久化消息。
@@ -113,7 +112,7 @@
   - 目标：覆盖率由 40% 提升到 50%+。
 - 迭代 2（P1）：`contextmgr + storage + provider`
   - 目标：覆盖率提升到 58%+。
-- 迭代 3（P2）：`skills + tui + 场景回归`
+- 迭代 3（P2）：`skills + repl + 场景回归`
   - 目标：覆盖率稳定在 60%+ 并持续回归。
 
 ## 8. 覆盖率门禁与质量门禁

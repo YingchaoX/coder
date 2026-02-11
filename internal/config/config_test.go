@@ -133,3 +133,20 @@ func TestLoadGlobalConfigCurrentPathOverridesLegacy(t *testing.T) {
 		t.Fatalf("model=%q", cfg.Provider.Model)
 	}
 }
+
+func TestMergeAgentConfig(t *testing.T) {
+	a := AgentConfig{Default: "build", Definitions: []AgentDefinition{{Name: "a"}}}
+	b := AgentConfig{Default: "plan", Definitions: []AgentDefinition{{Name: "b"}}}
+	out := MergeAgentConfig(a, b)
+	if out.Default != "plan" {
+		t.Fatalf("Default: got %q", out.Default)
+	}
+	if len(out.Definitions) != 2 || out.Definitions[0].Name != "a" || out.Definitions[1].Name != "b" {
+		t.Fatalf("Definitions: %#v", out.Definitions)
+	}
+	// b.Default empty does not override
+	out2 := MergeAgentConfig(AgentConfig{Default: "build"}, AgentConfig{Default: ""})
+	if out2.Default != "build" {
+		t.Fatalf("empty override: got %q", out2.Default)
+	}
+}

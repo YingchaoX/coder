@@ -16,7 +16,8 @@ type Info struct {
 }
 
 type Manager struct {
-	items map[string]Info
+	items         map[string]Info
+	builtinContent map[string]string // name -> full SKILL.md content for embedded skills
 }
 
 func Discover(paths []string) (*Manager, error) {
@@ -54,7 +55,7 @@ func Discover(paths []string) (*Manager, error) {
 			return nil, err
 		}
 	}
-	return &Manager{items: items}, nil
+	return &Manager{items: items, builtinContent: make(map[string]string)}, nil
 }
 
 func (m *Manager) List() []Info {
@@ -86,6 +87,11 @@ func (m *Manager) Load(name string) (string, error) {
 	item, ok := m.items[name]
 	if !ok {
 		return "", fmt.Errorf("skill not found: %s", name)
+	}
+	if m.builtinContent != nil {
+		if content, has := m.builtinContent[name]; has {
+			return content, nil
+		}
 	}
 	data, err := os.ReadFile(item.Path)
 	if err != nil {
@@ -130,6 +136,36 @@ func parseSkill(path string) (Info, error) {
 		abs = path
 	}
 	return Info{Name: name, Description: desc, Path: abs}, nil
+}
+
+// parseSkillContent parses name/description from SKILL.md content without reading from disk.
+// virtualPath is stored in Info.Path (e.g. "builtin:create-skill") for builtin skills.
+func parseSkillContent(content string, virtualPath string) (Info, error) {
+	name := ""
+	desc := ""
+	trimmed := strings.TrimSpace(content)
+	if strings.HasPrefix(trimmed, "---") {
+		front, _ := splitFrontmatter(trimmed)
+		for _, line := range strings.Split(front, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(strings.ToLower(line), "name:") {
+				name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
+			}
+			if strings.HasPrefix(strings.ToLower(line), "description:") {
+				desc = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+			}
+		}
+	}
+	if name == "" {
+		name = "unknown"
+	}
+	if desc == "" {
+		desc = firstParagraph(content)
+	}
+	if desc == "" {
+		desc = "No description"
+	}
+	return Info{Name: name, Description: desc, Path: virtualPath}, nil
 }
 
 func splitFrontmatter(content string) (string, string) {

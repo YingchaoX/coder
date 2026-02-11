@@ -2,30 +2,41 @@ package i18n
 
 // EnMessages English message catalog
 var EnMessages = map[string]string{
-	// TUI - Panel titles
+	// UI (TUI/REPL) - Panel titles
 	"panel.chat":  "Chat",
 	"panel.files": "Files",
 	"panel.logs":  "Logs",
 
-	// TUI - Sidebar
+	// UI (TUI sidebar)
 	"sidebar.context": "Context",
 	"sidebar.agent":   "Agent",
 	"sidebar.model":   "Model",
-	"sidebar.mcp":     "MCP",
 	"sidebar.lsp":     "LSP",
 	"sidebar.todo":    "Todo",
 
-	// TUI - Status bar
-	"status.workspace": "Workspace",
-	"status.ready":     "Ready",
-	"status.streaming": "Streaming...",
-	"status.thinking":  "Thinking...",
+	// UI - Status bar
+	"status.workspace":   "Workspace",
+	"status.ready":      "Ready",
+	"status.streaming":  "Streaming...",
+	"status.thinking":   "Thinking...",
+	"status.interrupted":  "Generation interrupted",
+	"status.expand_hint":  "expand",
 
-	// TUI - Input
+	// UI - Mode (REPL /mode or TUI Tab)
+	"mode.plan":      "plan",
+	"mode.default":   "default",
+	"mode.auto-edit": "auto-edit",
+	"mode.yolo":       "yolo",
+
+	// UI (TUI sidebar 5 modules)
+	"sidebar.tools":  "Tools",
+	"sidebar.skills": "Skills",
+
+	// UI - Input
 	"input.placeholder": "Type a message... (Shift+Enter for newline)",
 	"input.submit_hint": "Enter to send",
 
-	// TUI - Keybinding hints
+	// UI - Keybindings (TUI)
 	"keys.tab":    "tab switch",
 	"keys.esc":    "esc interrupt",
 	"keys.ctrl_p": "ctrl+p commands",
@@ -90,5 +101,5 @@ var EnMessages = map[string]string{
 	// Startup
 	"startup.welcome":   "Coder started in workspace: %s",
 	"startup.session":   "Session: %s agent=%s",
-	"startup.repl_mode": "Running in REPL mode (use --tui for full TUI)",
+	"startup.repl_mode": "Running in REPL mode",
 }

@@ -19,3 +19,6 @@ agent.config.json
 # Editor
 .vscode/
 .idea/
+.coder/
+.cursor/
+

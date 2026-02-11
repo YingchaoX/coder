@@ -9,10 +9,10 @@ import (
 
 func TestPolicyDecide(t *testing.T) {
 	p := New(config.PermissionConfig{
-		Default:   "ask",
-		Read:      "allow",
-		Write:     "deny",
-		TodoRead:  "allow",
+		Default:  "ask",
+		Read:     "allow",
+		Write:    "deny",
+		TodoRead: "allow",
 		TodoWrite: "deny",
 		Bash: map[string]string{
 			"*":      "ask",
@@ -46,5 +46,20 @@ func TestPolicyDecide(t *testing.T) {
 	denyArgs := json.RawMessage(`{"command":"rm -rf build"}`)
 	if got := p.Decide("bash", denyArgs).Decision; got != DecisionDeny {
 		t.Fatalf("bash deny decision=%s", got)
+	}
+}
+
+func TestPolicyDecide_CommandAllowlist(t *testing.T) {
+	p := New(config.PermissionConfig{
+		Default: "ask",
+		Bash: map[string]string{
+			"*": "ask",
+		},
+		CommandAllowlist: []string{"ls"},
+	})
+
+	args := json.RawMessage(`{"command":"FOO=1 ls -la"}`)
+	if got := p.Decide("bash", args).Decision; got != DecisionAllow {
+		t.Fatalf("bash decision with allowlist=%s, want allow", got)
 	}
 }

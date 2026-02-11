@@ -3,30 +3,41 @@ package i18n
 // ZhCNMessages 简体中文消息目录
 // ZhCNMessages Simplified Chinese message catalog
 var ZhCNMessages = map[string]string{
-	// TUI - 面板标题
+	// 界面 (TUI/REPL) - 面板标题
 	"panel.chat":  "对话",
 	"panel.files": "文件",
 	"panel.logs":  "日志",
 
-	// TUI - 侧边栏
+	// 界面 (TUI 侧栏)
 	"sidebar.context": "上下文",
 	"sidebar.agent":   "智能体",
 	"sidebar.model":   "模型",
-	"sidebar.mcp":     "MCP",
 	"sidebar.lsp":     "LSP",
 	"sidebar.todo":    "待办",
 
-	// TUI - 状态栏
-	"status.workspace": "工作区",
-	"status.ready":     "就绪",
-	"status.streaming": "生成中...",
-	"status.thinking":  "思考中...",
+	// 界面 - 状态栏
+	"status.workspace":   "工作区",
+	"status.ready":       "就绪",
+	"status.streaming":  "生成中...",
+	"status.thinking":   "思考中...",
+	"status.interrupted":  "生成已中断",
+	"status.expand_hint":  "展开",
 
-	// TUI - 输入
+	// 界面 - 模式 (REPL /mode 或 TUI Tab)
+	"mode.plan":      "plan",
+	"mode.default":   "default",
+	"mode.auto-edit": "auto-edit",
+	"mode.yolo":       "yolo",
+
+	// 界面 (TUI 侧栏 5 模块)
+	"sidebar.tools":  "Tools",
+	"sidebar.skills": "Skills",
+
+	// 界面 - 输入
 	"input.placeholder": "输入消息... (Shift+Enter 换行)",
 	"input.submit_hint": "回车发送",
 
-	// TUI - 快捷键提示
+	// 界面 - 快捷键 (TUI)
 	"keys.tab":    "tab 切换面板",
 	"keys.esc":    "esc 中断",
 	"keys.ctrl_p": "ctrl+p 命令",
@@ -91,5 +102,5 @@ var ZhCNMessages = map[string]string{
 	// 启动
 	"startup.welcome":   "Coder 已启动，工作区: %s",
 	"startup.session":   "会话: %s 智能体=%s",
-	"startup.repl_mode": "REPL 模式运行中 (使用 --tui 启用完整 TUI)",
+	"startup.repl_mode": "REPL 模式运行中",
 }

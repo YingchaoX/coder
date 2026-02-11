@@ -1,0 +1,141 @@
+# 09. REPL 交互与渲染实现（目标态）
+
+## 1. 提示符与输入区
+- **第一行**：固定展示 `context: N tokens · model: xxx`（当前 context 的 tokens 数与当前 model）；与正文区分，弱化辅助信息（见颜色约定）。
+- **第二行**：提示符 `[mode] /path/to/cwd> ` 及用户输入区；cwd 仅在此行展示，第一行不重复。
+- 凡出现用户输入提示符时，必须展示上述两行；不可省略。
+
+示例：
+- 第一行：`context: 1200 tokens · model: gpt-4o`
+- 第二行：`[default] /Users/dev/myapp> `（或后接用户已输入内容）
+
+## 2. 输入规则
+- **发送**：Enter 即发送当前输入。单行时直接 Enter 发送；多行仅支持粘贴：粘贴后终端显示 `[copy N lines]`，再按 Enter 发送该多行内容。TTY 下为 raw 模式；非 TTY（管道）下按行或 EOF 读取。
+- **输入历史（↑/↓）**：与 Linux 终端行为一致。在输入态下，↑ 可调出上一条用户输入，↓ 可调出下一条用户输入，用于当前会话中前后翻阅历史输入，不提交即不发送。
+- **输入分支**：
+  - `!` 前缀：命令模式，直走 `bash`。
+  - `/` 前缀：内建命令。
+  - 普通文本：进入模型-工具循环。
+
+## 3. 模式切换
+- 通过内建命令切换：`/mode <name>` 或 `/plan`、`/default`、`/auto-edit`、`/yolo`。
+- 切换后提示符立即体现当前模式（第二行 `[mode]` 更新）。
+
+## 4. 流式输出
+- 所有输出按时间顺序写入同一 stdout 流：用户消息、助手回复、工具摘要、日志文本。
+- 助手文本按 chunk 增量追加显示。
+- `thinking`（模型思考过程）在输出流内直接全文展示，不折叠。
+- 工具开始：记录工具名与简洁摘要；工具完成：展示结构化摘要；若有详细输出（如 write 的 diff），在同一输出流内直接展示，不提供折叠/展开。
+- `write`/`patch` 返回 diff 时，以 **unified diff 文本**（单列 `+`/`-`/`@@`）在输出流内展示，不做左右并排视图；diff 在工具完成时直接展示，无需额外操作。
+- 历史通过终端滚动回看。
+
+## 5. 颜色约定
+实现时可采用 ANSI 色或终端 256 色对应，与需求 01 第 8 节一致：
+
+| 类别 | 颜色 | 说明 |
+|------|------|------|
+| context 行（第一行 tokens · model） | 灰色 / dim | 与正文区分，弱化辅助信息 |
+| 提示符（`[mode] /path> `） | 绿色 / green | 标识输入位置 |
+| 用户输入 | 默认前景色 | 与助手回复同层级 |
+| 助手正文 / ANSWER 块 | 默认前景色 | 正文主色；**无左侧竖线**，仅保留 `[ANSWER]` 标题与正文 |
+| thinking | 灰色 / dim，可选斜体 | 与正文区分，表示“中间过程” |
+| 工具名/工具事件（如 `[tool] read`、`[bash]`） | 蓝色 / blue | 标识工具调用 |
+| 工具成功 | 绿色 / green | 表示成功 |
+| 工具失败/错误 | 红色 / red | 表示失败或需关注 |
+| diff 新增行（`+` 行） | 绿色 / green | 与通用 diff 习惯一致 |
+| diff 删除行（`-` 行） | 红色 / red | 与通用 diff 习惯一致 |
+| diff 元信息（`---`、`+++`、`@@`） | 灰色 / dim | 弱化元信息 |
+| 系统/审批/自动验证等提示 | 黄色 / yellow | 标识系统级或需确认信息 |
+| Todos 列表项 | 按状态 | **done** = 青 (cyan)；**in_progress** = 黄/橙 (yellow/orange)；**pending** = 灰 (dim/gray) |
+| 错误与异常 | 红色 / red | 明确错误态 |
+
+未列出的输出（如文件列表、命令 stdout 原文）使用默认前景色。若终端不支持多色，至少区分：正文（默认）、错误/失败（红或高亮）、提示符（绿或高亮）。
+
+## 6. 交互与中断
+- **Ctrl+C**：中断流式输出；也可退出程序。
+- 不保证 Esc 行为。
+- 界面极简：使用终端默认样式（等宽字体、少颜色、少装饰）。
+
+## 7. 状态与按需查看
+- **Context（tokens）与 model**：在每次等待输入时于第一行展示；由编排器或 REPL 层在显示提示符前提供当前 context 与 model。
+- **Todos**：在对话流中随回合展示；可通过 `/todos` 仅查看当前列表（只读）。
+- **Tools、Skills**：通过 `/tools`、`/skills` 按需查看，非固定侧栏。
+
+## 8. 审批交互
+- 触发场景：仅当**模型触发工具调用**且策略层或工具层判定为 `ask` 时（例如模型调用 `bash` 执行命令），命令模式 `!` 不走此交互链。
+- 策略层 `ask`（如 `bash policy requires approval`）：在 stdout 打印待执行命令与说明，从 REPL 读一行（y/n/always）后继续；`always` 表示将该命令记录到项目级 allowlist，后续相同命令在策略层自动放行。
+- 工具层危险命令风险审批（如 `matches dangerous command policy`）：在 stdout 打印命令与说明，仅接受 y/n，始终不提供 `always`。
+- 非交互模式（`auto_approve_ask=true` 或 `approval.interactive=false`）：不阻塞，自动放行策略层 `ask`，但危险命令风险审批仍需显式 y/n 或按配置拒绝执行。
+
+## 9. 状态同步（Orchestrator 驱动）
+Orchestrator 在步进/回合结束时通过回调或写出的方式，将需展示的内容输出到同一 stdout 流：
+- 文本 chunk
+- reasoning chunk
+- tool start / tool done
+- context 统计（用于下次显示提示符第一行）
+- session/model 更新（影响提示符与持久化）
+
+提示符在每次显示前由编排器或 REPL 层提供当前 context 与 model；不保留“侧栏推送”表述。
+
+## 10. 错误可见性
+- 命令错误、工具错误、权限拒绝均在 stdout 可读展示。
+- 流式中断后保留已接收内容，且明确标注中断状态。
+
+## 11. 命令模式（`!`）与上下文
+
+### 11.1 流程概览（时序）
+
+命令模式在 `RunInput` 层做分流，仅在行首以 `!` 开头时走该路径，**不触发模型调用**，但会写入消息历史并刷新上下文统计：
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant REPL
+    participant Orchestrator
+    participant Tools
+    participant LLM
+
+    User->>REPL: "! ls"
+    REPL->>Orchestrator: RunInput("! ls")
+    Orchestrator->>Orchestrator: parseBangCommand 命中
+    Orchestrator->>Orchestrator: messages += user{"! ls"}
+    Orchestrator->>Tools: Execute("bash", {command:"ls"})
+    Tools-->>Orchestrator: bashResult(JSON: stdout/stderr/exit_code/...)
+    Orchestrator->>Orchestrator: formatBangCommandResult + 行级截断
+    Orchestrator->>Orchestrator: messages += assistant{cmd_block}
+    Orchestrator->>Orchestrator: emitContextUpdate()
+    Orchestrator-->>REPL: cmd_block
+    REPL->>REPL: 渲染 [COMMAND] 区块 + 最新 context 行
+
+    User->>REPL: "请根据刚才 ls 结果..."
+    REPL->>Orchestrator: RunInput(普通问题 → RunTurn)
+    Orchestrator->>LLM: buildProviderMessages()（包含刚才 user/assistant 文本）
+    LLM-->>Orchestrator: 回答/工具调用
+    Orchestrator-->>REPL: 最终 [ANSWER] 块
+```
+
+### 11.2 实现要点
+
+- **入口与分流**：
+  - `RunInput` 内部通过 `parseBangCommand` 判断是否为命令模式；命中后调用 `runBangCommand`，否则走 `/` 内建命令或 `RunTurn`（模型-工具循环）。
+  - `runBangCommand` 首先追加一条 `user` 消息，内容为原始输入（例如 `"! ls"`），确保命令本身在后续模型上下文中可见。
+- **命令执行与风险模型**：
+  - 命令模式通过 `registry.Execute("bash", args)` 直接调用 `bash` 工具；**显式跳过策略层 Policy 与工具层风险审批链**，语义等价“用户自己在 shell 中执行该命令”。
+  - 仍受工具层安全配置约束：`command_timeout_ms` 与 `output_limit_bytes`；`bash` 在 JSON 结果中返回 `exit_code`、`stdout`、`stderr`、`truncated`、`duration_ms` 等字段。
+  - 是否允许调用 `bash` 仅由 `activeAgent.ToolEnabled["bash"]` 控制；禁止时返回 `command mode denied: bash disabled by active agent <name>` 的 `assistant` 文本。
+- **渲染与 `[COMMAND]` 区块**：
+  - `formatBangCommandResult` 将 `bash` 的 JSON 结果格式化为人类可读文本 `cmd_block`，包括：
+    - `$ <command>` 行（命令回显）；
+    - `exit=<code> duration=<xx>ms` 行（附 ` (truncated)` 标记表示底层字节截断）；
+    - `stdout:` 段与 `stderr:` 段（如有）；
+    - 在无任何输出时附加 `(no output)` 行。
+  - `runBangCommand` 将 `cmd_block` 追加为一条 `assistant` 消息，并调用 `renderCommandBlock` 将其渲染为单独的 `[COMMAND]` 区块；旧版的 `[command mode]` 文本头已移除，仅保留 `[COMMAND]` 头与正文。
+- **输出截断策略（双层）**：
+  - **字节级截断（底层工具）**：`bash` 使用 `output_limit_bytes` 限制 stdout/stderr 缓冲区大小，超出部分被丢弃并在文本末尾追加 `"[output truncated]"` 行，同时在 JSON 中设置 `truncated=true`。
+  - **行级截断（展示层）**：`formatBangCommandResult` 仅对 stdout/stderr 的**展示文本**按行数做二次截断：
+    - 每个段最多展示前 N 行（当前实现约 20 行，可通过常量调整）；
+    - 被行级截断时，在对应段末尾追加 `...[output truncated for display]` 或 `...[error output truncated for display]` 一行提示；
+    - 仅影响渲染给用户的文本，不修改 `bash` 返回的原始 JSON 内容。
+- **上下文与 context 行刷新**：
+  - 命令模式不会调用 LLM，但其 `user("! ...")` 与 `assistant(cmd_block)` 均写入 `o.messages`，在下一次 `RunTurn` 时通过 `buildProviderMessages()` 一并发给模型。
+  - `runBangCommand` 结束前调用 `emitContextUpdate()`，基于最新消息序列与 `context_token_limit` 估算 tokens，触发 `OnContextUpdate` 回调；REPL 利用该回调在下一次提示符前重绘 `context: <tokens> · model: <name>` 行，使命令输出对上下文大小的影响在 UI 上立刻可见。

@@ -30,6 +30,40 @@ func New(cfg config.PermissionConfig) *Policy {
 	return &Policy{cfg: cfg}
 }
 
+// isAllowedByCommandAllowlist 判断给定命令是否命中项目级 command_allowlist。
+// isAllowedByCommandAllowlist checks whether the given command is allowed by project-level command_allowlist.
+func (p *Policy) isAllowedByCommandAllowlist(command string) bool {
+	if len(p.cfg.CommandAllowlist) == 0 {
+		return false
+	}
+	name := config.NormalizeCommandName(command)
+	if name == "" {
+		return false
+	}
+	for _, raw := range p.cfg.CommandAllowlist {
+		if strings.ToLower(strings.TrimSpace(raw)) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// AddToCommandAllowlist 追加命令名到 allowlist，返回是否实际新增。
+// AddToCommandAllowlist appends a command name to the allowlist and returns true if it was newly added.
+func (p *Policy) AddToCommandAllowlist(commandName string) bool {
+	name := strings.ToLower(strings.TrimSpace(commandName))
+	if name == "" {
+		return false
+	}
+	for _, raw := range p.cfg.CommandAllowlist {
+		if strings.ToLower(strings.TrimSpace(raw)) == name {
+			return false
+		}
+	}
+	p.cfg.CommandAllowlist = append(p.cfg.CommandAllowlist, name)
+	return true
+}
+
 func (p *Policy) Decide(toolName string, rawArgs json.RawMessage) Result {
 	tool := strings.ToLower(strings.TrimSpace(toolName))
 	if tool == "" {
@@ -134,6 +168,11 @@ func (p *Policy) decideBash(rawArgs json.RawMessage) Result {
 		}
 	}
 
+	// allowlist：当策略决策为 ask 且命中项目级 command_allowlist 时，直接 allow。
+	if decision == DecisionAsk && p.isAllowedByCommandAllowlist(command) {
+		return Result{Decision: DecisionAllow}
+	}
+
 	switch decision {
 	case DecisionAllow:
 		return Result{Decision: DecisionAllow}
@@ -156,4 +195,70 @@ func normalizeDecision(raw string, fallback Decision) Decision {
 	default:
 		return fallback
 	}
+}
+
+// Summary 返回当前权限矩阵的简短描述（供 /permissions 展示）
+func (p *Policy) Summary() string {
+	def := string(p.defaultDecision())
+	parts := []string{
+		"default: " + def,
+		"read: " + p.cfg.Read,
+		"write: " + p.cfg.Write,
+		"patch: " + p.cfg.Patch,
+		"todoread: " + p.cfg.TodoRead,
+		"todowrite: " + p.cfg.TodoWrite,
+		"skill: " + p.cfg.Skill,
+		"task: " + p.cfg.Task,
+	}
+	bashDef := def
+	if p.cfg.Bash != nil {
+		if v, ok := p.cfg.Bash["*"]; ok && strings.TrimSpace(v) != "" {
+			bashDef = strings.TrimSpace(strings.ToLower(v))
+		}
+	}
+	parts = append(parts, "bash: "+bashDef)
+	return strings.Join(parts, ", ")
+}
+
+// PresetConfig 返回命名预设的权限配置；name 为 strict | balanced | auto-edit | yolo
+func PresetConfig(name string) (config.PermissionConfig, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch name {
+	case "strict":
+		return config.PermissionConfig{
+			Default: "deny", Read: "allow", Write: "deny", Patch: "deny",
+			TodoRead: "allow", TodoWrite: "deny", Skill: "deny", Task: "deny",
+			Bash: map[string]string{"*": "deny"},
+		}, true
+	case "balanced":
+		return config.PermissionConfig{
+			Default: "ask", Read: "allow", Write: "ask", Patch: "ask",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask",
+			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
+		}, true
+	case "auto-edit":
+		return config.PermissionConfig{
+			Default: "allow", Read: "allow", Write: "allow", Patch: "allow",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow",
+			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
+		}, true
+	case "yolo":
+		return config.PermissionConfig{
+			Default: "allow", Read: "allow", Write: "allow", Patch: "allow",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow",
+			Bash: map[string]string{"*": "allow"},
+		}, true
+	default:
+		return config.PermissionConfig{}, false
+	}
+}
+
+// ApplyPreset 应用命名预设并返回是否成功
+func (p *Policy) ApplyPreset(name string) bool {
+	cfg, ok := PresetConfig(name)
+	if !ok {
+		return false
+	}
+	p.cfg = cfg
+	return true
 }

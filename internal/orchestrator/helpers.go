@@ -1,0 +1,415 @@
+package orchestrator
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"coder/internal/chat"
+)
+
+func (o *Orchestrator) resolveMaxSteps() int {
+	if o.activeAgent.MaxSteps > 0 {
+		return o.activeAgent.MaxSteps
+	}
+	if o.maxSteps <= 0 {
+		return 128
+	}
+	return o.maxSteps
+}
+
+func (o *Orchestrator) appendSyntheticToolExchange(toolName, args, result, callID string) {
+	if strings.TrimSpace(toolName) == "" || strings.TrimSpace(callID) == "" {
+		return
+	}
+	o.appendMessage(chat.Message{
+		Role: "assistant",
+		ToolCalls: []chat.ToolCall{
+			{
+				ID:   callID,
+				Type: "function",
+				Function: chat.ToolCallFunction{
+					Name:      toolName,
+					Arguments: args,
+				},
+			},
+		},
+	})
+	o.appendMessage(chat.Message{
+		Role:       "tool",
+		Name:       toolName,
+		ToolCallID: callID,
+		Content:    result,
+	})
+}
+
+func (o *Orchestrator) appendToolDenied(call chat.ToolCall, reason string) {
+	o.appendMessage(chat.Message{
+		Role:       "tool",
+		Name:       call.Function.Name,
+		ToolCallID: call.ID,
+		Content: mustJSON(map[string]any{
+			"ok":     false,
+			"denied": true,
+			"reason": reason,
+		}),
+	})
+}
+
+func (o *Orchestrator) appendToolError(call chat.ToolCall, err error) {
+	o.appendMessage(chat.Message{
+		Role:       "tool",
+		Name:       call.Function.Name,
+		ToolCallID: call.ID,
+		Content: mustJSON(map[string]any{
+			"ok":    false,
+			"error": err.Error(),
+		}),
+	})
+}
+
+func mustJSON(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return `{"ok":false,"error":"marshal tool result failed"}`
+	}
+	return string(data)
+}
+
+func summarizeForLog(s string) string {
+	normalized := strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	if normalized == "" {
+		return "-"
+	}
+	const maxRunes = 220
+	runes := []rune(normalized)
+	if len(runes) <= maxRunes {
+		return normalized
+	}
+	return string(runes[:maxRunes]) + "...(truncated)"
+}
+
+func formatToolStart(name string, rawArgs string) string {
+	args := parseJSONObject(rawArgs)
+	switch name {
+	case "read":
+		path := getString(args, "path", "")
+		return fmt.Sprintf("* Read %s", quoteOrDash(path))
+	case "list":
+		path := getString(args, "path", ".")
+		return fmt.Sprintf("* List %s", quoteOrDash(path))
+	case "glob":
+		pattern := getString(args, "pattern", "")
+		return fmt.Sprintf("* Glob %s", quoteOrDash(pattern))
+	case "grep":
+		pattern := getString(args, "pattern", "")
+		path := getString(args, "path", ".")
+		return fmt.Sprintf("* Grep %s in %s", quoteOrDash(pattern), quoteOrDash(path))
+	case "write":
+		path := getString(args, "path", "")
+		content := getString(args, "content", "")
+		return fmt.Sprintf("* Write %s (%d bytes)", quoteOrDash(path), len(content))
+	case "patch":
+		return "* Apply patch"
+	case "todoread":
+		return "* Read todo list"
+	case "todowrite":
+		return "* Update todo list"
+	case "skill":
+		action := getString(args, "action", "")
+		nameArg := getString(args, "name", "")
+		if nameArg == "" {
+			return fmt.Sprintf("* Skill %s", quoteOrDash(action))
+		}
+		return fmt.Sprintf("* Skill %s %s", quoteOrDash(action), quoteOrDash(nameArg))
+	case "task":
+		agentName := getString(args, "agent", "")
+		objective := getString(args, "objective", "")
+		if objective == "" {
+			objective = getString(args, "prompt", "")
+		}
+		return fmt.Sprintf("* Task %s: %s", quoteOrDash(agentName), quoteOrDash(short(objective, 80)))
+	case "bash":
+		cmd := getString(args, "command", "")
+		return fmt.Sprintf("* Bash %s", quoteOrDash(cmd))
+	default:
+		return fmt.Sprintf("* %s args=%s", title(name), summarizeForLog(rawArgs))
+	}
+}
+
+func summarizeToolResult(name string, rawResult string) string {
+	result := parseJSONObject(rawResult)
+	if len(result) == 0 {
+		return summarizeForLog(rawResult)
+	}
+	switch name {
+	case "read":
+		path := getString(result, "path", "")
+		content := getString(result, "content", "")
+		return fmt.Sprintf("read %d bytes from %s", len(content), quoteOrDash(path))
+	case "list":
+		path := getString(result, "path", "")
+		return fmt.Sprintf("%d entries in %s", len(getArray(result, "items")), quoteOrDash(path))
+	case "glob":
+		return fmt.Sprintf("%d matches", len(getArray(result, "matches")))
+	case "grep":
+		count := getInt(result, "count", len(getArray(result, "matches")))
+		return fmt.Sprintf("%d matches", count)
+	case "write":
+		path := getString(result, "path", "")
+		size := getInt(result, "size", 0)
+		operation := strings.ToLower(strings.TrimSpace(getString(result, "operation", "")))
+		additions := getInt(result, "additions", 0)
+		deletions := getInt(result, "deletions", 0)
+		diff := strings.TrimSpace(getString(result, "diff", ""))
+		line := fmt.Sprintf("wrote %d bytes to %s", size, quoteOrDash(path))
+		switch operation {
+		case "created":
+			line = fmt.Sprintf("created %s (+%d lines, %d bytes)", quoteOrDash(path), additions, size)
+		case "updated":
+			line = fmt.Sprintf("updated %s (+%d -%d lines, %d bytes)", quoteOrDash(path), additions, deletions, size)
+		case "unchanged":
+			line = fmt.Sprintf("no-op write to %s (%d bytes)", quoteOrDash(path), size)
+		}
+		if diff != "" {
+			return line + "\n" + diff
+		}
+		return line
+	case "patch":
+		return fmt.Sprintf("patched %d file(s)", getInt(result, "applied", 0))
+	case "todoread":
+		return formatTodoSummary(result, "todo")
+	case "todowrite":
+		return formatTodoSummary(result, "todo updated")
+	case "skill":
+		if content := getString(result, "content", ""); content != "" {
+			return fmt.Sprintf("loaded skill (%d bytes)", len(content))
+		}
+		return fmt.Sprintf("%d skills", getInt(result, "count", len(getArray(result, "items"))))
+	case "task":
+		return summarizeForLog(getString(result, "summary", "task finished"))
+	case "bash":
+		exitCode := getInt(result, "exit_code", -1)
+		duration := getInt(result, "duration_ms", 0)
+		stdout := strings.TrimSpace(getString(result, "stdout", ""))
+		stderr := strings.TrimSpace(getString(result, "stderr", ""))
+		if exitCode == 0 {
+			if stdout != "" {
+				return fmt.Sprintf("exit=0 in %dms, stdout=%s", duration, summarizeForLog(firstLine(stdout)))
+			}
+			return fmt.Sprintf("exit=0 in %dms", duration)
+		}
+		if stderr != "" {
+			return fmt.Sprintf("exit=%d in %dms, stderr=%s", exitCode, duration, summarizeForLog(firstLine(stderr)))
+		}
+		return fmt.Sprintf("exit=%d in %dms", exitCode, duration)
+	default:
+		if errText := getString(result, "error", ""); errText != "" {
+			return summarizeForLog(errText)
+		}
+		return summarizeForLog(rawResult)
+	}
+}
+
+// todoItemsFromResult 从 todoread/todowrite 的 JSON result 解析出展示用 []string（TUI 侧栏或 REPL /todos）
+// todoItemsFromResult parses todoread/todowrite JSON result into display lines (TUI sidebar or REPL /todos)
+func todoItemsFromResult(rawResult string) []string {
+	result := parseJSONObject(rawResult)
+	if result == nil {
+		return nil
+	}
+	items := getArray(result, "items")
+	if len(items) == 0 {
+		return nil
+	}
+	var out []string
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		content := strings.TrimSpace(getString(item, "content", ""))
+		if content == "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s %s", todoStatusMarker(getString(item, "status", "")), content))
+	}
+	return out
+}
+
+func formatTodoSummary(result map[string]any, label string) string {
+	items := getArray(result, "items")
+	headline := fmt.Sprintf("%s items=%d", label, getInt(result, "count", len(items)))
+	if len(items) == 0 {
+		return headline
+	}
+	lines := []string{headline}
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		content := strings.TrimSpace(getString(item, "content", ""))
+		if content == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s %s", todoStatusMarker(getString(item, "status", "")), content))
+	}
+	if len(lines) == 1 {
+		return headline
+	}
+	return strings.Join(lines, "\n")
+}
+
+func parseJSONObject(s string) map[string]any {
+	var out map[string]any
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func getString(m map[string]any, key, fallback string) string {
+	if m == nil {
+		return fallback
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return fallback
+	}
+	switch val := v.(type) {
+	case string:
+		if val == "" {
+			return fallback
+		}
+		return val
+	default:
+		return fallback
+	}
+}
+
+func getArray(m map[string]any, key string) []any {
+	if m == nil {
+		return nil
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil
+	}
+	out, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	return out
+}
+
+func getInt(m map[string]any, key string, fallback int) int {
+	if m == nil {
+		return fallback
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return fallback
+	}
+	switch val := v.(type) {
+	case float64:
+		return int(val)
+	case int:
+		return val
+	case int64:
+		return int(val)
+	case string:
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fallback
+		}
+		return n
+	default:
+		return fallback
+	}
+}
+
+func firstLine(s string) string {
+	parts := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+func quoteOrDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return strconv.Quote(summarizeForLog(s))
+}
+
+func title(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "Tool"
+	}
+	runes := []rune(s)
+	runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
+	return string(runes)
+}
+
+func short(s string, max int) string {
+	r := []rune(strings.TrimSpace(s))
+	if len(r) <= max {
+		return string(r)
+	}
+	return string(r[:max]) + "..."
+}
+
+func todoStatusMarker(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed":
+		return "[x]"
+	case "in_progress":
+		return "[~]"
+	default:
+		return "[ ]"
+	}
+}
+
+func containsHan(s string) bool {
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
+}
+
+func isComplexTask(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return false
+	}
+	if len([]rune(trimmed)) >= 80 {
+		return true
+	}
+	keywords := []string{
+		"并", "然后", "同时", "步骤", "重构", "实现", "修复", "优化",
+		"and then", "step by step", "refactor", "implement", "fix",
+	}
+	lower := strings.ToLower(trimmed)
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	delimiters := strings.Count(trimmed, "，") + strings.Count(trimmed, ",") + strings.Count(trimmed, ";") + strings.Count(trimmed, "；")
+	if delimiters >= 2 {
+		return true
+	}
+	return len(strings.Fields(trimmed)) >= 14
+}

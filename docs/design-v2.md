@@ -18,7 +18,7 @@
 7. `docs/technical/06-Provider与模型调用.md`
 8. `docs/technical/07-存储与迁移实现.md`
 9. `docs/technical/08-Skills实现.md`
-10. `docs/technical/09-TUI交互与渲染实现.md`
+10. `docs/technical/09-REPL交互与渲染实现.md`
 11. `docs/technical/10-配置加载与覆盖.md`
 
 ## 3. 需求文档入口
