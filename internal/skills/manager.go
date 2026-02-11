@@ -16,7 +16,7 @@ type Info struct {
 }
 
 type Manager struct {
-	items         map[string]Info
+	items          map[string]Info
 	builtinContent map[string]string // name -> full SKILL.md content for embedded skills
 }
 

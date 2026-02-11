@@ -9,10 +9,10 @@ import (
 
 func TestPolicyDecide(t *testing.T) {
 	p := New(config.PermissionConfig{
-		Default:  "ask",
-		Read:     "allow",
-		Write:    "deny",
-		TodoRead: "allow",
+		Default:   "ask",
+		Read:      "allow",
+		Write:     "deny",
+		TodoRead:  "allow",
 		TodoWrite: "deny",
 		Bash: map[string]string{
 			"*":      "ask",

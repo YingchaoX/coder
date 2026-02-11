@@ -29,4 +29,3 @@ func deleteLastRuneAndWidth(s string) (string, int) {
 	}
 	return next, width
 }
-

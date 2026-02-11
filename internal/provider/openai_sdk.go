@@ -162,12 +162,12 @@ type compatChatRequest struct {
 type compatStreamChunk struct {
 	Choices []struct {
 		Delta struct {
-			Role            string `json:"role,omitempty"`
-			Content         string `json:"content,omitempty"`
-			Reasoning       string `json:"reasoning,omitempty"`
+			Role             string `json:"role,omitempty"`
+			Content          string `json:"content,omitempty"`
+			Reasoning        string `json:"reasoning,omitempty"`
 			ReasoningContent string `json:"reasoning_content,omitempty"`
-			ToolCalls       []struct {
-				Index    *int `json:"index,omitempty"`
+			ToolCalls        []struct {
+				Index    *int   `json:"index,omitempty"`
 				ID       string `json:"id,omitempty"`
 				Type     string `json:"type,omitempty"`
 				Function struct {
@@ -179,9 +179,9 @@ type compatStreamChunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens            int `json:"prompt_tokens"`
+		CompletionTokens        int `json:"completion_tokens"`
+		TotalTokens             int `json:"total_tokens"`
 		CompletionTokensDetails *struct {
 			ReasoningTokens int `json:"reasoning_tokens"`
 		} `json:"completion_tokens_details,omitempty"`

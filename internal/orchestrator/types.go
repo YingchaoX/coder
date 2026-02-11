@@ -52,10 +52,10 @@ type Options struct {
 	Agents            config.AgentConfig
 	Workflow          config.WorkflowConfig
 	WorkspaceRoot     string
-	SkillNames        []string       // for /skills (optional)
-	Store             storage.Store  // for /new, /resume, /model session update
-	SessionIDRef      *string        // mutable current session ID (todo tools read this)
-	ConfigBasePath    string         // project dir for ./.coder/config.json persist (/model)
+	SkillNames        []string      // for /skills (optional)
+	Store             storage.Store // for /new, /resume, /model session update
+	SessionIDRef      *string       // mutable current session ID (todo tools read this)
+	ConfigBasePath    string        // project dir for ./.coder/config.json persist (/model)
 }
 
 type ContextStats struct {

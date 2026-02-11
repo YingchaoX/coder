@@ -155,4 +155,3 @@ func (o *Orchestrator) flushSessionToFile(_ context.Context) error {
 	}
 	return os.Rename(tmpPath, path)
 }
-

@@ -59,4 +59,3 @@ func TestDeleteLastRuneAndWidth(t *testing.T) {
 		})
 	}
 }
-

@@ -353,10 +353,10 @@ func TestShouldAutoVerifyEditedPaths(t *testing.T) {
 
 func TestParseSlashCommand(t *testing.T) {
 	tests := []struct {
-		input       string
-		wantCmd     string
-		wantArgs    string
-		wantOk      bool
+		input    string
+		wantCmd  string
+		wantArgs string
+		wantOk   bool
 	}{
 		{input: "/help", wantCmd: "help", wantArgs: "", wantOk: true},
 		{input: "  /model qwen  ", wantCmd: "model", wantArgs: "qwen", wantOk: true},

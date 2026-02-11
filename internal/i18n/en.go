@@ -16,17 +16,17 @@ var EnMessages = map[string]string{
 
 	// UI - Status bar
 	"status.workspace":   "Workspace",
-	"status.ready":      "Ready",
-	"status.streaming":  "Streaming...",
-	"status.thinking":   "Thinking...",
-	"status.interrupted":  "Generation interrupted",
-	"status.expand_hint":  "expand",
+	"status.ready":       "Ready",
+	"status.streaming":   "Streaming...",
+	"status.thinking":    "Thinking...",
+	"status.interrupted": "Generation interrupted",
+	"status.expand_hint": "expand",
 
 	// UI - Mode (REPL /mode or TUI Tab)
 	"mode.plan":      "plan",
 	"mode.default":   "default",
 	"mode.auto-edit": "auto-edit",
-	"mode.yolo":       "yolo",
+	"mode.yolo":      "yolo",
 
 	// UI (TUI sidebar 5 modules)
 	"sidebar.tools":  "Tools",

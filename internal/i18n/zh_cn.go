@@ -18,16 +18,16 @@ var ZhCNMessages = map[string]string{
 	// 界面 - 状态栏
 	"status.workspace":   "工作区",
 	"status.ready":       "就绪",
-	"status.streaming":  "生成中...",
-	"status.thinking":   "思考中...",
-	"status.interrupted":  "生成已中断",
-	"status.expand_hint":  "展开",
+	"status.streaming":   "生成中...",
+	"status.thinking":    "思考中...",
+	"status.interrupted": "生成已中断",
+	"status.expand_hint": "展开",
 
 	// 界面 - 模式 (REPL /mode 或 TUI Tab)
 	"mode.plan":      "plan",
 	"mode.default":   "default",
 	"mode.auto-edit": "auto-edit",
-	"mode.yolo":       "yolo",
+	"mode.yolo":      "yolo",
 
 	// 界面 (TUI 侧栏 5 模块)
 	"sidebar.tools":  "Tools",

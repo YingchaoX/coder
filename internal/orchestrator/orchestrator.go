@@ -38,11 +38,11 @@ type Orchestrator struct {
 	workflow          config.WorkflowConfig
 	workspaceRoot     string
 	compStrategy      contextmgr.CompactionStrategy
-	mode              string         // plan | default | auto-edit | yolo (REPL /mode)
-	skillNames        []string       // for /skills
+	mode              string        // plan | default | auto-edit | yolo (REPL /mode)
+	skillNames        []string      // for /skills
 	store             storage.Store // for /new, /resume, /model
-	sessionIDRef      *string        // mutable current session ID
-	configBasePath    string         // for /model persist
+	sessionIDRef      *string       // mutable current session ID
+	configBasePath    string        // for /model persist
 }
 
 func New(providerClient provider.Provider, registry *tools.Registry, opts Options) *Orchestrator {

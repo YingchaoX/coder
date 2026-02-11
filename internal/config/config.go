@@ -47,24 +47,24 @@ type ApprovalConfig struct {
 }
 
 type PermissionConfig struct {
-	DefaultWildcard  string            `json:"*"`
-	Default          string            `json:"default"`
-	Read             string            `json:"read"`
-	Write            string            `json:"write"`
-	List             string            `json:"list"`
-	Glob             string            `json:"glob"`
-	Grep             string            `json:"grep"`
-	Patch            string            `json:"patch"`
-	TodoRead         string            `json:"todoread"`
-	TodoWrite        string            `json:"todowrite"`
-	Bash             map[string]string `json:"bash"`
-	Skill            string            `json:"skill"`
-	Task             string            `json:"task"`
-	ExternalDir      string            `json:"external_directory"`
+	DefaultWildcard string            `json:"*"`
+	Default         string            `json:"default"`
+	Read            string            `json:"read"`
+	Write           string            `json:"write"`
+	List            string            `json:"list"`
+	Glob            string            `json:"glob"`
+	Grep            string            `json:"grep"`
+	Patch           string            `json:"patch"`
+	TodoRead        string            `json:"todoread"`
+	TodoWrite       string            `json:"todowrite"`
+	Bash            map[string]string `json:"bash"`
+	Skill           string            `json:"skill"`
+	Task            string            `json:"task"`
+	ExternalDir     string            `json:"external_directory"`
 	// CommandAllowlist 记录“始终同意的命令”（按命令名归一化）。
 	// CommandAllowlist stores commands that have been marked as \"always allow\" (normalized by command name).
 	CommandAllowlist []string `json:"command_allowlist"`
-	InstructionFiles []string          `json:"instruction_files"`
+	InstructionFiles []string `json:"instruction_files"`
 }
 
 type WorkflowConfig struct {
@@ -206,7 +206,7 @@ func Default() Config {
 			MaxVerifyAttempts:     2,
 			VerifyCommands:        nil,
 		},
-		Agent:  AgentConfig{Default: "build"},
+		Agent: AgentConfig{Default: "build"},
 		Skills: SkillsConfig{
 			Paths: []string{"./.skills", "~/.offline-agent/skills", "~/.codex/skills"},
 		},
