@@ -34,7 +34,10 @@ func TestLoadConfigAndPrecedence(t *testing.T) {
   "provider": {"model": "project-model"},
   "compaction": {"auto": true, "prune": false}
 }`
-	if err := os.WriteFile("agent.config.json", []byte(projectCfg), 0o644); err != nil {
+	if err := os.MkdirAll(".coder", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(".coder", "config.json"), []byte(projectCfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +85,10 @@ func TestProviderModelsNormalization(t *testing.T) {
     "models": ["m1", "m2", "m1", "  ", "m3"]
   }
 }`
-	if err := os.WriteFile("agent.config.json", []byte(projectCfg), 0o644); err != nil {
+	if err := os.MkdirAll(".coder", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(".coder", "config.json"), []byte(projectCfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load("")

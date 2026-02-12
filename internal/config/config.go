@@ -231,7 +231,7 @@ func MergeAgentConfig(a, b AgentConfig) AgentConfig {
 	return out
 }
 
-func Load(path string) (Config, error) {
+func Load(_ string) (Config, error) {
 	cfg := Default()
 
 	for _, globalPath := range globalConfigPaths() {
@@ -240,14 +240,7 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	resolvedPath := strings.TrimSpace(path)
-	if envPath := strings.TrimSpace(os.Getenv("AGENT_CONFIG_PATH")); envPath != "" {
-		resolvedPath = envPath
-	}
-	if resolvedPath == "" {
-		resolvedPath = findProjectConfigPath()
-	}
-	if err := mergeFromFile(&cfg, resolvedPath); err != nil {
+	if err := mergeFromFile(&cfg, findProjectConfigPath()); err != nil {
 		return Config{}, err
 	}
 
@@ -267,14 +260,9 @@ func globalConfigPaths() []string {
 }
 
 func findProjectConfigPath() string {
-	candidates := []string{
-		"agent.config.json",
-		".coder/config.json",
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
+	path := ".coder/config.json"
+	if _, err := os.Stat(path); err == nil {
+		return path
 	}
 	return ""
 }
@@ -802,6 +790,46 @@ func stripJSONComments(data []byte) []byte {
 	}
 
 	return out.Bytes()
+}
+
+// InitProjectConfigScaffold 在当前工作目录下初始化项目级配置模板（./.coder/config.json）。
+// InitProjectConfigScaffold initializes a project-level config scaffold (./.coder/config.json) in the current working directory.
+func InitProjectConfigScaffold() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get current working directory: %w", err)
+	}
+
+	dir := filepath.Join(cwd, ".coder")
+	path := filepath.Join(dir, "config.json")
+
+	// 若项目已经有 ./.coder/config.json，则尊重用户现有配置。
+	info, err := os.Stat(path)
+	if err == nil {
+		if info.IsDir() {
+			return fmt.Errorf("project config path is a directory: %s", path)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat project config: %w", err)
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir .coder: %w", err)
+	}
+
+	cfg := Default()
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal default config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write project config: %w", err)
+	}
+
+	return nil
 }
 
 // WriteProviderModel 将 provider.model 写入项目配置（./.coder/config.json）；目录不存在则创建

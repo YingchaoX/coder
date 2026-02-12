@@ -25,6 +25,10 @@ func main() {
 
 	i18n.Init(locale)
 
+	if err := config.InitProjectConfigScaffold(); err != nil {
+		fmt.Fprintf(os.Stderr, "init project config failed: %v\n", err)
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
