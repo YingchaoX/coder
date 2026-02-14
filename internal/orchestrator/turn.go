@@ -82,7 +82,12 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			onTextChunk = o.onTextChunk
 		}
 
-		resp, err := o.chatWithRetry(ctx, o.buildProviderMessages(), o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled), onTextChunk, onReasoningChunk)
+		// 对于闲聊/简单问候，不提供工具定义，避免模型过度探索
+		toolDefs := o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled)
+		if isChattyGreeting(userInput) && step == 0 {
+			toolDefs = nil
+		}
+		resp, err := o.chatWithRetry(ctx, o.buildProviderMessages(), toolDefs, onTextChunk, onReasoningChunk)
 		if err != nil {
 			if streamed {
 				streamRenderer.Finish()

@@ -475,3 +475,76 @@ func isComplexTask(input string) bool {
 	}
 	return len(strings.Fields(trimmed)) >= 14
 }
+
+// isChattyGreeting 判断输入是否是闲聊/简单问候，不需要使用工具
+// 泛化性判断：短文本（<30字符）、仅包含问候/寒暄/简单问好的模式、没有具体任务指令
+func isChattyGreeting(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return false
+	}
+
+	// 长度检查：超过50字符的通常不是闲聊
+	runes := []rune(trimmed)
+	if len(runes) > 50 {
+		return false
+	}
+
+	// 包含指令性关键词的，不是闲聊
+	instructionKeywords := []string{
+		"修改", "添加", "删除", "修复", "优化", "重构", "实现", "创建",
+		"modify", "add", "delete", "fix", "optimize", "refactor", "implement", "create",
+		"改", "写", "查", "看", "读", "run", "execute", "build", "test",
+	}
+	lower := strings.ToLower(trimmed)
+	for _, kw := range instructionKeywords {
+		if strings.Contains(lower, kw) {
+			return false
+		}
+	}
+
+	// 包含任务标点（冒号、问号+请求语气）的不是闲聊
+	if strings.Contains(trimmed, ":") || strings.Contains(trimmed, "：") {
+		return false
+	}
+
+	// 问候模式匹配（多语言支持）
+	greetingPatterns := []string{
+		"你好", "您好", "hello", "hi", "hey", "yo",
+		"在吗", "在？", "在?", "在么", "在不",
+		"早上好", "下午好", "晚上好", "good morning", "good afternoon", "good evening",
+		"g'day", "hola", "bonjour", "ciao", "olá", "hej", "hallo", "szia", "привет",
+		"谢谢", "多谢", "thanks", "thank you", "thx", "谢了",
+		"再见", "拜拜", "bye", "goodbye", "see you", "cya",
+		"睡", "吃", "天气", "time", "时间", "几点", "date", "日期",
+		"怎么样", "好吗", "ok", "okay", "好", "行", "可以",
+	}
+
+	for _, pattern := range greetingPatterns {
+		if strings.Contains(lower, strings.ToLower(pattern)) {
+			// 匹配到问候词，且问候词占总内容的大部分，判定为闲聊
+			// 如果问候后还有大量非问候内容（>20字符），则不是闲聊
+			patternIdx := strings.Index(lower, strings.ToLower(pattern))
+			afterGreeting := strings.TrimSpace(lower[patternIdx+len(pattern):])
+			if len([]rune(afterGreeting)) < 20 {
+				return true
+			}
+		}
+	}
+
+	// 纯感叹词/简单短句（1-3个词）
+	words := strings.Fields(trimmed)
+	if len(words) <= 3 && len(runes) < 20 {
+		// 检查是否主要是问候语气
+		for _, w := range words {
+			wLower := strings.ToLower(w)
+			for _, p := range greetingPatterns {
+				if strings.Contains(p, wLower) || strings.Contains(wLower, p) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
