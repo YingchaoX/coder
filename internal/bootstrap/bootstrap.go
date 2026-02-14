@@ -15,6 +15,7 @@ import (
 	"coder/internal/config"
 	"coder/internal/contextmgr"
 	"coder/internal/defaults"
+	"coder/internal/lsp"
 	"coder/internal/orchestrator"
 	"coder/internal/permission"
 	"coder/internal/provider"
@@ -70,6 +71,17 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 	}
 	skills.MergeBuiltin(skillManager)
 
+	// Initialize LSP Manager
+	lspManager := lsp.NewManager(cfg.LSP, ws.Root())
+	missingServers := lspManager.DetectServers()
+	if len(missingServers) > 0 {
+		fmt.Fprintln(os.Stderr, "[LSP] Some language servers are not installed:")
+		for _, info := range lspManager.GetMissingServers() {
+			fmt.Fprintf(os.Stderr, "[LSP]   %s (%s): %s\n", info.Lang, info.Command, info.InstallHint)
+		}
+		fmt.Fprintln(os.Stderr, "[LSP] LSP tools will be disabled for these languages. Install the servers to enable LSP features.")
+	}
+
 	policy := permission.New(cfg.Permission)
 	agentsCfg := config.MergeAgentConfig(cfg.Agent, cfg.Agents)
 	activeProfile := agent.Resolve("", agentsCfg)
@@ -118,6 +130,9 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 		todoWriteTool,
 		skillTool,
 		taskTool,
+		tools.NewLSPDiagnosticsTool(lspManager),
+		tools.NewLSPDefinitionTool(lspManager),
+		tools.NewLSPHoverTool(lspManager),
 	}
 	registry := tools.NewRegistry(toolList...)
 

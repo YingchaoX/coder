@@ -61,9 +61,12 @@ type PermissionConfig struct {
 	Bash            map[string]string `json:"bash"`
 	Skill           string            `json:"skill"`
 	Task            string            `json:"task"`
+	LSPDiagnostics  string            `json:"lsp_diagnostics"`
+	LSPDefinition   string            `json:"lsp_definition"`
+	LSPHover        string            `json:"lsp_hover"`
 	ExternalDir     string            `json:"external_directory"`
-	// CommandAllowlist 记录“始终同意的命令”（按命令名归一化）。
-	// CommandAllowlist stores commands that have been marked as \"always allow\" (normalized by command name).
+	// CommandAllowlist 记录"始终同意的命令"（按命令名归一化）。
+	// CommandAllowlist stores commands that have been marked as "always allow" (normalized by command name).
 	CommandAllowlist []string `json:"command_allowlist"`
 	InstructionFiles []string `json:"instruction_files"`
 }
@@ -101,6 +104,16 @@ type StorageConfig struct {
 	CacheTTLHours int    `json:"cache_ttl_hours"`
 }
 
+type LSPServerConfig struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	Enabled bool     `json:"enabled"`
+}
+
+type LSPConfig struct {
+	Servers map[string]LSPServerConfig `json:"servers"`
+}
+
 type Config struct {
 	Provider     ProviderConfig   `json:"provider"`
 	Runtime      RuntimeConfig    `json:"runtime"`
@@ -114,6 +127,7 @@ type Config struct {
 	Skills       SkillsConfig     `json:"skills"`
 	Instructions []string         `json:"instructions"`
 	Storage      StorageConfig    `json:"storage"`
+	LSP          LSPConfig        `json:"lsp"`
 }
 
 type fileCompactionConfig struct {
@@ -135,6 +149,10 @@ type fileApprovalConfig struct {
 	Interactive    *bool `json:"interactive"`
 }
 
+type fileLSPConfig struct {
+	Servers map[string]LSPServerConfig `json:"servers"`
+}
+
 type fileConfig struct {
 	Provider     *ProviderConfig       `json:"provider"`
 	Runtime      *RuntimeConfig        `json:"runtime"`
@@ -148,6 +166,7 @@ type fileConfig struct {
 	Skills       *SkillsConfig         `json:"skills"`
 	Instructions *[]string             `json:"instructions"`
 	Storage      *StorageConfig        `json:"storage"`
+	LSP          *fileLSPConfig        `json:"lsp"`
 }
 
 func Default() Config {
@@ -189,6 +208,9 @@ func Default() Config {
 			TodoWrite:       "allow",
 			Skill:           "ask",
 			Task:            "ask",
+			LSPDiagnostics:  "allow",
+			LSPDefinition:   "allow",
+			LSPHover:        "allow",
 			Bash: map[string]string{
 				"*":          "ask",
 				"ls *":       "allow",
@@ -214,6 +236,20 @@ func Default() Config {
 			BaseDir:       "~/.coder",
 			LogMaxMB:      20,
 			CacheTTLHours: 168,
+		},
+		LSP: LSPConfig{
+			Servers: map[string]LSPServerConfig{
+				"sh": {
+					Command: "bash-language-server",
+					Args:    []string{"start"},
+					Enabled: true,
+				},
+				"py": {
+					Command: "pylsp",
+					Args:    []string{},
+					Enabled: true,
+				},
+			},
 		},
 	}
 }
@@ -359,6 +395,21 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	if fc.Storage != nil {
 		cfg.Storage = mergeStorage(cfg.Storage, *fc.Storage)
 	}
+	if fc.LSP != nil {
+		cfg.LSP = mergeLSP(cfg.LSP, *fc.LSP)
+	}
+}
+
+func mergeLSP(base LSPConfig, override fileLSPConfig) LSPConfig {
+	if len(override.Servers) > 0 {
+		if base.Servers == nil {
+			base.Servers = make(map[string]LSPServerConfig)
+		}
+		for lang, server := range override.Servers {
+			base.Servers[lang] = server
+		}
+	}
+	return base
 }
 
 func mergeProvider(base ProviderConfig, override ProviderConfig) ProviderConfig {
@@ -442,6 +493,15 @@ func mergePermission(base PermissionConfig, override PermissionConfig) Permissio
 	}
 	if strings.TrimSpace(override.Task) != "" {
 		base.Task = override.Task
+	}
+	if strings.TrimSpace(override.LSPDiagnostics) != "" {
+		base.LSPDiagnostics = override.LSPDiagnostics
+	}
+	if strings.TrimSpace(override.LSPDefinition) != "" {
+		base.LSPDefinition = override.LSPDefinition
+	}
+	if strings.TrimSpace(override.LSPHover) != "" {
+		base.LSPHover = override.LSPHover
 	}
 	if strings.TrimSpace(override.ExternalDir) != "" {
 		base.ExternalDir = override.ExternalDir
