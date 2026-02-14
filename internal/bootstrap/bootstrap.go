@@ -82,6 +82,18 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 		fmt.Fprintln(os.Stderr, "[LSP] LSP tools will be disabled for these languages. Install the servers to enable LSP features.")
 	}
 
+	// Initialize Git Manager
+	gitManager := tools.NewGitManager(ws)
+	if available, isRepo, version := gitManager.Check(); !available {
+		fmt.Fprintln(os.Stderr, "[Git] Git is not installed.")
+		fmt.Fprintln(os.Stderr, "[Git] Git tools will be disabled. Install git to enable git features.")
+	} else if !isRepo {
+		fmt.Fprintln(os.Stderr, "[Git] Current directory is not a git repository.")
+		fmt.Fprintln(os.Stderr, "[Git] Git tools will work in degraded mode. Initialize git to enable full features.")
+	} else {
+		fmt.Fprintf(os.Stderr, "[Git] Git detected: %s\n", version)
+	}
+
 	policy := permission.New(cfg.Permission)
 	agentsCfg := config.MergeAgentConfig(cfg.Agent, cfg.Agents)
 	activeProfile := agent.Resolve("", agentsCfg)
@@ -133,6 +145,11 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 		tools.NewLSPDiagnosticsTool(lspManager),
 		tools.NewLSPDefinitionTool(lspManager),
 		tools.NewLSPHoverTool(lspManager),
+		tools.NewGitStatusTool(ws, gitManager),
+		tools.NewGitDiffTool(ws, gitManager),
+		tools.NewGitLogTool(ws, gitManager),
+		tools.NewGitAddTool(ws, gitManager),
+		tools.NewGitCommitTool(ws, gitManager),
 	}
 	registry := tools.NewRegistry(toolList...)
 
