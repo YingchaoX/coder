@@ -593,6 +593,60 @@ func TestIsComplexTask(t *testing.T) {
 	}
 }
 
+func TestIsChattyGreeting(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		// 闲聊/问候
+		{"你好", true},
+		{"您好", true},
+		{"hello", true},
+		{"hi", true},
+		{"hey", true},
+		{"在吗", true},
+		{"早上好", true},
+		{"good morning", true},
+		{"thanks", true},
+		{"thank you", true},
+		{"bye", true},
+		{"再见", true},
+		{"怎么样", true},
+		{"ok", true},
+		{"how are you", true},
+
+		// 不是闲聊 - 有任务指令
+		{"你好，帮我修改代码", false},
+		{"hello, add a feature", false},
+		{"查看一下文件", false},
+		{"run test", false},
+		{"fix the bug", false},
+		{"实现功能", false},
+		{"create file.txt", false},
+
+		// 不是闲聊 - 太长
+		{"你好，这是一个很长的问候语句，超过了长度限制所以不是闲聊", false},
+		{"hello this is a very long greeting message that exceeds the limit", false},
+
+		// 不是闲聊 - 包含冒号（通常是任务描述）
+		{"你好: 请帮我做这件事", false},
+		{"task: hello", false},
+
+		// 不是闲聊 - 空字符串
+		{"", false},
+
+		// 边界情况 - 短但无明确问候词
+		{"what", false},
+		{"why", false},
+	}
+	for _, tc := range tests {
+		got := isChattyGreeting(tc.input)
+		if got != tc.want {
+			t.Fatalf("isChattyGreeting(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestIsDocLikePath(t *testing.T) {
 	tests := []struct {
 		path string
