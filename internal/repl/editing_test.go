@@ -59,3 +59,87 @@ func TestDeleteLastRuneAndWidth(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoryNavigator_Empty(t *testing.T) {
+	nav := newHistoryNavigator(nil)
+	if got, ok := nav.Prev(); ok || got != "" {
+		t.Fatalf("empty Prev = (%q,%v), want (\"\",false)", got, ok)
+	}
+	if got, ok := nav.Next(); ok || got != "" {
+		t.Fatalf("empty Next = (%q,%v), want (\"\",false)", got, ok)
+	}
+}
+
+func TestHistoryNavigator_BasicWalk(t *testing.T) {
+	nav := newHistoryNavigator([]string{"one", "two", "three"})
+
+	// Start at fresh input, first Up -> last entry.
+	if got, ok := nav.Prev(); !ok || got != "three" {
+		t.Fatalf("first Prev = (%q,%v), want (\"three\",true)", got, ok)
+	}
+	// Second Up -> second entry.
+	if got, ok := nav.Prev(); !ok || got != "two" {
+		t.Fatalf("second Prev = (%q,%v), want (\"two\",true)", got, ok)
+	}
+	// Third Up -> first entry.
+	if got, ok := nav.Prev(); !ok || got != "one" {
+		t.Fatalf("third Prev = (%q,%v), want (\"one\",true)", got, ok)
+	}
+	// Further Up stays on first entry.
+	if got, ok := nav.Prev(); !ok || got != "one" {
+		t.Fatalf("fourth Prev = (%q,%v), want (\"one\",true)", got, ok)
+	}
+
+	// Down from first -> second.
+	if got, ok := nav.Next(); !ok || got != "two" {
+		t.Fatalf("first Next = (%q,%v), want (\"two\",true)", got, ok)
+	}
+	// Down from second -> third.
+	if got, ok := nav.Next(); !ok || got != "three" {
+		t.Fatalf("second Next = (%q,%v), want (\"three\",true)", got, ok)
+	}
+	// Down from third -> empty (fresh input).
+	if got, ok := nav.Next(); !ok || got != "" {
+		t.Fatalf("third Next = (%q,%v), want (\"\",true)", got, ok)
+	}
+	// Further Down keeps empty.
+	if got, ok := nav.Next(); !ok || got != "" {
+		t.Fatalf("fourth Next = (%q,%v), want (\"\",true)", got, ok)
+	}
+}
+
+func TestAppendPrintableToPaste(t *testing.T) {
+	body := "line1\nline2\n"
+
+	// Accept printable ASCII.
+	nb, ok := appendPrintableToPaste(body, '3')
+	if !ok {
+		t.Fatalf("appendPrintableToPaste should accept '3'")
+	}
+	if nb != "line1\nline2\n3" {
+		t.Fatalf("appendPrintableToPaste wrong result: %q", nb)
+	}
+
+	// Reject non-printable (e.g. newline).
+	nb2, ok := appendPrintableToPaste(nb, '\n')
+	if ok {
+		t.Fatalf("appendPrintableToPaste should reject '\\n'")
+	}
+	if nb2 != nb {
+		t.Fatalf("appendPrintableToPaste modified body for non-printable: %q", nb2)
+	}
+}
+
+func TestHistoryDisplayString_SingleLine(t *testing.T) {
+	if got := historyDisplayString("echo 1"); got != "echo 1" {
+		t.Fatalf("historyDisplayString(single line) = %q, want %q", got, "echo 1")
+	}
+}
+
+func TestHistoryDisplayString_MultiLine(t *testing.T) {
+	body := "line1\nline2\nline3\n"
+	got := historyDisplayString(body)
+	if got != "[copy 3 lines]" {
+		t.Fatalf("historyDisplayString(multi line) = %q, want %q", got, "[copy 3 lines]")
+	}
+}
