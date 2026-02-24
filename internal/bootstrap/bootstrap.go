@@ -150,6 +150,13 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 		tools.NewGitLogTool(ws, gitManager),
 		tools.NewGitAddTool(ws, gitManager),
 		tools.NewGitCommitTool(ws, gitManager),
+		tools.NewFetchTool(ws, tools.FetchConfig{
+			TimeoutSec:     cfg.Fetch.TimeoutMS / 1000,
+			MaxTextSizeKB:  cfg.Fetch.MaxTextSizeKB,
+			MaxImageSizeMB: cfg.Fetch.MaxImageSizeMB,
+			SkipTLSVerify:  cfg.Fetch.SkipTLSVerify,
+			DefaultHeaders: cfg.Fetch.DefaultHeaders,
+		}),
 	}
 	registry := tools.NewRegistry(toolList...)
 

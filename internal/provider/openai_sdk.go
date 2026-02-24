@@ -535,12 +535,47 @@ func assembleToolCalls(byIdx map[int]*toolCallAccumulator) []chat.ToolCall {
 func convertMessages(messages []chat.Message) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, m := range messages {
-		msg := openai.ChatCompletionMessage{
-			Role:       m.Role,
-			Content:    m.Content,
-			Name:       m.Name,
-			ToolCallID: m.ToolCallID,
+		var msg openai.ChatCompletionMessage
+
+		// Check if message has multi-modal content
+		if m.MultiContent != nil && len(m.MultiContent) > 0 {
+			// Multi-modal message - create a JSON representation that's compatible
+			// Since ChatCompletionMessage.Content expects a string, we'll combine text and image content
+			var combinedContent strings.Builder
+
+			for i, part := range m.MultiContent {
+				if i > 0 {
+					combinedContent.WriteString("\n")
+				}
+
+				switch v := part.(type) {
+				case chat.TextContent:
+					combinedContent.WriteString(v.Text)
+				case chat.ImageContent:
+					// For images, we'll add a placeholder indicating the image URL
+					combinedContent.WriteString(fmt.Sprintf("[Image: %s]", v.ImageURL.URL))
+				}
+			}
+
+			// For proper multi-modal support, we'll need to use a different approach
+			// that's compatible with the go-openai library's ChatCompletionMessage
+			// For now, we'll use the combined text content
+			msg = openai.ChatCompletionMessage{
+				Role:       m.Role,
+				Content:    combinedContent.String(),
+				Name:       m.Name,
+				ToolCallID: m.ToolCallID,
+			}
+		} else {
+			// Regular text message
+			msg = openai.ChatCompletionMessage{
+				Role:       m.Role,
+				Content:    m.Content,
+				Name:       m.Name,
+				ToolCallID: m.ToolCallID,
+			}
 		}
+
 		if len(m.ToolCalls) > 0 {
 			msg.ToolCalls = make([]openai.ToolCall, 0, len(m.ToolCalls))
 			for _, tc := range m.ToolCalls {

@@ -46,6 +46,14 @@ type ApprovalConfig struct {
 	Interactive bool `json:"interactive"`
 }
 
+type FetchConfig struct {
+	TimeoutMS      int               `json:"timeout_ms"`
+	MaxTextSizeKB  int               `json:"max_text_size_kb"`
+	MaxImageSizeMB int               `json:"max_image_size_mb"`
+	SkipTLSVerify  bool              `json:"skip_tls_verify"`
+	DefaultHeaders map[string]string `json:"default_headers"`
+}
+
 type PermissionConfig struct {
 	DefaultWildcard string            `json:"*"`
 	Default         string            `json:"default"`
@@ -64,6 +72,7 @@ type PermissionConfig struct {
 	LSPDiagnostics  string            `json:"lsp_diagnostics"`
 	LSPDefinition   string            `json:"lsp_definition"`
 	LSPHover        string            `json:"lsp_hover"`
+	Fetch           string            `json:"fetch"`
 	ExternalDir     string            `json:"external_directory"`
 	// CommandAllowlist 记录"始终同意的命令"（按命令名归一化）。
 	// CommandAllowlist stores commands that have been marked as "always allow" (normalized by command name).
@@ -128,6 +137,7 @@ type Config struct {
 	Instructions []string         `json:"instructions"`
 	Storage      StorageConfig    `json:"storage"`
 	LSP          LSPConfig        `json:"lsp"`
+	Fetch        FetchConfig      `json:"fetch"`
 }
 
 type fileCompactionConfig struct {
@@ -153,6 +163,14 @@ type fileLSPConfig struct {
 	Servers map[string]LSPServerConfig `json:"servers"`
 }
 
+type fileFetchConfig struct {
+	TimeoutMS      *int              `json:"timeout_ms"`
+	MaxTextSizeKB  *int              `json:"max_text_size_kb"`
+	MaxImageSizeMB *int              `json:"max_image_size_mb"`
+	SkipTLSVerify  *bool             `json:"skip_tls_verify"`
+	DefaultHeaders map[string]string `json:"default_headers"`
+}
+
 type fileConfig struct {
 	Provider     *ProviderConfig       `json:"provider"`
 	Runtime      *RuntimeConfig        `json:"runtime"`
@@ -167,6 +185,7 @@ type fileConfig struct {
 	Instructions *[]string             `json:"instructions"`
 	Storage      *StorageConfig        `json:"storage"`
 	LSP          *fileLSPConfig        `json:"lsp"`
+	Fetch        *fileFetchConfig      `json:"fetch"`
 }
 
 func Default() Config {
@@ -249,6 +268,15 @@ func Default() Config {
 					Args:    []string{},
 					Enabled: true,
 				},
+			},
+		},
+		Fetch: FetchConfig{
+			TimeoutMS:      30000,
+			MaxTextSizeKB:  100,
+			MaxImageSizeMB: 1,
+			SkipTLSVerify:  true,
+			DefaultHeaders: map[string]string{
+				"User-Agent": "Coder-Agent/1.0",
 			},
 		},
 	}
@@ -398,6 +426,26 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	if fc.LSP != nil {
 		cfg.LSP = mergeLSP(cfg.LSP, *fc.LSP)
 	}
+	if fc.Fetch != nil {
+		if fc.Fetch.TimeoutMS != nil {
+			cfg.Fetch.TimeoutMS = *fc.Fetch.TimeoutMS
+		}
+		if fc.Fetch.MaxTextSizeKB != nil {
+			cfg.Fetch.MaxTextSizeKB = *fc.Fetch.MaxTextSizeKB
+		}
+		if fc.Fetch.MaxImageSizeMB != nil {
+			cfg.Fetch.MaxImageSizeMB = *fc.Fetch.MaxImageSizeMB
+		}
+		if fc.Fetch.SkipTLSVerify != nil {
+			cfg.Fetch.SkipTLSVerify = *fc.Fetch.SkipTLSVerify
+		}
+		if fc.Fetch.DefaultHeaders != nil {
+			cfg.Fetch.DefaultHeaders = map[string]string{}
+			for k, v := range fc.Fetch.DefaultHeaders {
+				cfg.Fetch.DefaultHeaders[k] = v
+			}
+		}
+	}
 }
 
 func mergeLSP(base LSPConfig, override fileLSPConfig) LSPConfig {
@@ -502,6 +550,9 @@ func mergePermission(base PermissionConfig, override PermissionConfig) Permissio
 	}
 	if strings.TrimSpace(override.LSPHover) != "" {
 		base.LSPHover = override.LSPHover
+	}
+	if strings.TrimSpace(override.Fetch) != "" {
+		base.Fetch = override.Fetch
 	}
 	if strings.TrimSpace(override.ExternalDir) != "" {
 		base.ExternalDir = override.ExternalDir
@@ -647,6 +698,17 @@ func normalize(cfg *Config) error {
 			norm = append(norm, name)
 		}
 		cfg.Permission.CommandAllowlist = norm
+	}
+
+	// 归一化 Fetch 配置
+	if cfg.Fetch.TimeoutMS <= 0 {
+		cfg.Fetch.TimeoutMS = Default().Fetch.TimeoutMS
+	}
+	if cfg.Fetch.MaxTextSizeKB <= 0 {
+		cfg.Fetch.MaxTextSizeKB = Default().Fetch.MaxTextSizeKB
+	}
+	if cfg.Fetch.MaxImageSizeMB <= 0 {
+		cfg.Fetch.MaxImageSizeMB = Default().Fetch.MaxImageSizeMB
 	}
 
 	return nil
