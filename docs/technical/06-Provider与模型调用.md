@@ -14,6 +14,7 @@
 - SDK：`github.com/sashabaranov/go-openai`
 - 协议：OpenAI 兼容 Chat Completions（流式）
 - 部署形态：私有化模型服务（内网地址）
+- 多模态支持：兼容 OpenAI 多模态消息格式（text + image_url）
 
 请求关键字段：
 - `model`
@@ -21,6 +22,13 @@
 - `tools`
 - `stream=true`
 - `tool_choice=auto`
+
+## 2.1 多模态消息支持
+- **消息格式**：兼容 OpenAI 多模态格式，支持 `content` 为字符串（纯文本）或数组（多模态内容）
+- **内容类型**：
+  - `type: "text"` - 文本内容
+  - `type: "image_url"` - 图片URL（支持 `data:image/...;base64,...` 格式）
+- **向后兼容**：纯文本消息格式保持不变，不影响现有功能
 
 ## 3. 流式处理
 每个 chunk 处理：

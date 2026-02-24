@@ -26,12 +26,40 @@ type ToolCall struct {
 	Function ToolCallFunction `json:"function"`
 }
 
+// ContentPart represents a part of a multi-modal message content
+type ContentPart interface {
+	isContentPart()
+}
+
+// TextContent represents text content in a multi-modal message
+type TextContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func (t TextContent) isContentPart() {}
+
+// ImageContent represents image content in a multi-modal message
+type ImageContent struct {
+	Type     string   `json:"type"`
+	ImageURL ImageURL `json:"image_url"`
+}
+
+func (i ImageContent) isContentPart() {}
+
+// ImageURL represents an image URL in multi-modal messages
+type ImageURL struct {
+	URL    string `json:"url"`              // URL or data URL
+	Detail string `json:"detail,omitempty"` // "low", "high", or "auto"
+}
+
 // Message is an OpenAI-compatible chat message.
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content,omitempty"`
-	Reasoning  string     `json:"reasoning,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role         string        `json:"role"`
+	Content      string        `json:"content,omitempty"` // For backward compatibility
+	MultiContent []ContentPart `json:"-"`                 // Multi-modal content (takes precedence over Content)
+	Reasoning    string        `json:"reasoning,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
 }

@@ -126,6 +126,8 @@ func (p *Policy) toolRule(tool string) string {
 		return p.cfg.Skill
 	case "task":
 		return p.cfg.Task
+	case "fetch":
+		return p.cfg.Fetch
 	default:
 		return p.cfg.Default
 	}
@@ -212,6 +214,7 @@ func (p *Policy) Summary() string {
 		"todowrite: " + p.cfg.TodoWrite,
 		"skill: " + p.cfg.Skill,
 		"task: " + p.cfg.Task,
+		"fetch: " + p.cfg.Fetch,
 	}
 	bashDef := def
 	if p.cfg.Bash != nil {
@@ -230,25 +233,25 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 	case "strict":
 		return config.PermissionConfig{
 			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny",
-			TodoRead: "allow", TodoWrite: "deny", Skill: "deny", Task: "deny",
+			TodoRead: "allow", TodoWrite: "deny", Skill: "deny", Task: "deny", Fetch: "deny",
 			Bash: map[string]string{"*": "deny"},
 		}, true
 	case "balanced":
 		return config.PermissionConfig{
 			Default: "ask", Read: "allow", Edit: "ask", Write: "ask", Patch: "ask",
-			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask", Fetch: "ask",
 			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
 		}, true
 	case "auto-edit":
 		return config.PermissionConfig{
 			Default: "allow", Read: "allow", Edit: "allow", Write: "allow", Patch: "allow",
-			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow", Fetch: "allow",
 			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
 		}, true
 	case "yolo":
 		return config.PermissionConfig{
 			Default: "allow", Read: "allow", Edit: "allow", Write: "allow", Patch: "allow",
-			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow", Fetch: "allow",
 			Bash: map[string]string{"*": "allow"},
 		}, true
 	default:
