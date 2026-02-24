@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"coder/internal/security"
@@ -31,10 +32,27 @@ func TestFetchTool_Execute(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "image/png")
 			w.Write(imgData)
-		} else {
+		} else if r.URL.Path == "/test-html" {
 			// Return HTML content
 			w.Header().Set("Content-Type", "text/html")
 			w.Write([]byte("<html><body><h1>Test Page</h1></body></html>"))
+		} else if r.URL.Path == "/test-large-text" {
+			// Return large plain text content (> 100KB but < 5MB)
+			w.Header().Set("Content-Type", "text/plain")
+			large := make([]byte, 150*1024)
+			for i := range large {
+				large[i] = 'a'
+			}
+			w.Write(large)
+		} else if r.URL.Path == "/test-pdf" {
+			// Return a small fake PDF payload; contents don't need to be a valid PDF because
+			// fetch only inspects headers and size, and does not attempt to parse PDF bytes.
+			w.Header().Set("Content-Type", "application/pdf")
+			w.Write([]byte("%PDF-1.7\n%fake\n"))
+		} else if r.URL.Path == "/test-binary" {
+			// Return generic binary content.
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write([]byte{0, 1, 2, 3, 4, 5})
 		}
 	}))
 	defer ts.Close()
@@ -42,7 +60,7 @@ func TestFetchTool_Execute(t *testing.T) {
 	// Create fetch tool with test config
 	tool := NewFetchTool(ws, FetchConfig{
 		TimeoutSec:     30,
-		MaxTextSizeKB:  100,
+		MaxTextSizeKB:  5 * 1024,
 		MaxImageSizeMB: 1,
 		SkipTLSVerify:  true,
 	})
@@ -72,9 +90,9 @@ func TestFetchTool_Execute(t *testing.T) {
 		if fetchResult.IsImage {
 			t.Error("Expected result not to be an image")
 		}
-		expectedContent := "<html><body><h1>Test Page</h1></body></html>"
-		if fetchResult.Content != expectedContent {
-			t.Errorf("Expected content %s, got %s", expectedContent, fetchResult.Content)
+		// Default behavior for HTML is to return markdown content containing the main text.
+		if !strings.Contains(fetchResult.Content, "# Test Page") && !strings.Contains(fetchResult.Content, "Test Page") {
+			t.Errorf("Expected markdown content to contain heading 'Test Page', got %s", fetchResult.Content)
 		}
 	})
 
@@ -109,6 +127,96 @@ func TestFetchTool_Execute(t *testing.T) {
 		// Check that the content is base64 encoded (starts with valid base64 characters)
 		if len(fetchResult.Content) == 0 {
 			t.Error("Expected non-empty content for image")
+		}
+	})
+
+	t.Run("fetch large text content within 5MB limit", func(t *testing.T) {
+		args := map[string]interface{}{
+			"url": ts.URL + "/test-large-text",
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := tool.Execute(context.Background(), argsJSON)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		var fetchResult FetchResult
+		if err := json.Unmarshal([]byte(result), &fetchResult); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+
+		if fetchResult.StatusCode != 200 {
+			t.Errorf("Expected status code 200, got %d", fetchResult.StatusCode)
+		}
+		if fetchResult.ContentType != "text/plain" {
+			t.Errorf("Expected content type text/plain, got %s", fetchResult.ContentType)
+		}
+		if fetchResult.IsImage {
+			t.Error("Expected result not to be an image")
+		}
+		if len(fetchResult.Content) == 0 {
+			t.Error("Expected non-empty content for large text response")
+		}
+	})
+
+	t.Run("fetch pdf content returns metadata only", func(t *testing.T) {
+		args := map[string]interface{}{
+			"url": ts.URL + "/test-pdf",
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := tool.Execute(context.Background(), argsJSON)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		var fetchResult FetchResult
+		if err := json.Unmarshal([]byte(result), &fetchResult); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+
+		if fetchResult.ContentType != "application/pdf" {
+			t.Errorf("Expected content type application/pdf, got %s", fetchResult.ContentType)
+		}
+		if fetchResult.IsImage {
+			t.Error("Expected pdf result not to be an image")
+		}
+		if !strings.Contains(fetchResult.Content, "PDF content omitted.") {
+			t.Errorf("Expected pdf content to be summarized, got %q", fetchResult.Content)
+		}
+		if fetchResult.SizeBytes == 0 {
+			t.Error("Expected non-zero size for pdf response")
+		}
+	})
+
+	t.Run("fetch binary content returns metadata only", func(t *testing.T) {
+		args := map[string]interface{}{
+			"url": ts.URL + "/test-binary",
+		}
+		argsJSON, _ := json.Marshal(args)
+
+		result, err := tool.Execute(context.Background(), argsJSON)
+		if err != nil {
+			t.Fatalf("Unexpected error: %v", err)
+		}
+
+		var fetchResult FetchResult
+		if err := json.Unmarshal([]byte(result), &fetchResult); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+
+		if fetchResult.ContentType != "application/octet-stream" {
+			t.Errorf("Expected content type application/octet-stream, got %s", fetchResult.ContentType)
+		}
+		if fetchResult.IsImage {
+			t.Error("Expected binary result not to be an image")
+		}
+		if !strings.Contains(fetchResult.Content, "Binary content omitted.") {
+			t.Errorf("Expected binary content to be summarized, got %q", fetchResult.Content)
+		}
+		if fetchResult.SizeBytes == 0 {
+			t.Error("Expected non-zero size for binary response")
 		}
 	})
 

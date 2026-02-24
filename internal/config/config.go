@@ -272,7 +272,7 @@ func Default() Config {
 		},
 		Fetch: FetchConfig{
 			TimeoutMS:      30000,
-			MaxTextSizeKB:  100,
+			MaxTextSizeKB:  5 * 1024, // 统一的非图片响应大小上限（约 5MB）
 			MaxImageSizeMB: 1,
 			SkipTLSVerify:  true,
 			DefaultHeaders: map[string]string{

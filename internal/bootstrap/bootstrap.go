@@ -157,6 +157,7 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 			SkipTLSVerify:  cfg.Fetch.SkipTLSVerify,
 			DefaultHeaders: cfg.Fetch.DefaultHeaders,
 		}),
+		tools.NewPDFParserTool(ws),
 	}
 	registry := tools.NewRegistry(toolList...)
 

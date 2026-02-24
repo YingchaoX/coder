@@ -15,6 +15,7 @@ import (
 
 	"coder/internal/chat"
 	"coder/internal/security"
+	"golang.org/x/net/html"
 )
 
 type FetchTool struct {
@@ -30,6 +31,10 @@ type FetchConfig struct {
 	DefaultHeaders map[string]string
 }
 
+// maxJSONTextBytes 是非图片响应在 JSON 结果中可占用的最大文本字节数上限，
+// 进一步防止工具返回体本身过大把整个对话请求体撑爆。
+const maxJSONTextBytes = 512 * 1024
+
 type FetchArgs struct {
 	URL        string            `json:"url"`
 	Method     string            `json:"method"`
@@ -37,6 +42,7 @@ type FetchArgs struct {
 	Body       string            `json:"body"`
 	TimeoutSec int               `json:"timeout_sec"`
 	MaxSizeKB  int               `json:"max_size_kb"`
+	Format     string            `json:"format"`
 	Auth       *FetchAuth        `json:"auth"`
 }
 
@@ -70,7 +76,7 @@ func (t *FetchTool) Definition() chat.ToolDef {
 		Type: "function",
 		Function: chat.ToolFunction{
 			Name:        t.Name(),
-			Description: "Fetch content from HTTP/HTTPS URL, supports text and images",
+			Description: "Fetch content from HTTP/HTTPS URL. Returns text/HTML as markdown or plain text, images as base64, and only metadata (no raw bytes) for PDFs and other binary content.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -92,6 +98,15 @@ func (t *FetchTool) Definition() chat.ToolDef {
 						"type":        "string",
 						"description": "Request body for POST/PUT requests",
 					},
+					"format": map[string]any{
+						"type": "string",
+						"enum": []string{
+							"text",
+							"markdown",
+							"html",
+						},
+						"description": "Preferred format for non-image content. For HTML responses, 'markdown' converts to Markdown, 'text' extracts plain text, and 'html' returns raw HTML. Defaults to 'markdown' for HTML responses and 'text' for others.",
+					},
 					"timeout_sec": map[string]any{
 						"type":        "integer",
 						"description": "Request timeout in seconds",
@@ -99,8 +114,8 @@ func (t *FetchTool) Definition() chat.ToolDef {
 					},
 					"max_size_kb": map[string]any{
 						"type":        "integer",
-						"description": "Maximum response size in KB",
-						"default":     1000, // 1MB
+						"description": "Maximum response size in KB for non-image content",
+						"default":     5120, // 5MB
 					},
 					"auth": map[string]any{
 						"type": "object",
@@ -153,10 +168,9 @@ func (t *FetchTool) Execute(_ context.Context, args json.RawMessage) (string, er
 
 	maxSizeKB := in.MaxSizeKB
 	if maxSizeKB <= 0 {
-		// For images, use max image size; for text, use max text size
-		maxSizeKB = t.cfg.MaxTextSizeKB * 1000 // Convert MB to KB for images
+		maxSizeKB = t.cfg.MaxTextSizeKB
 		if maxSizeKB <= 0 {
-			maxSizeKB = 1000 // 1MB default
+			maxSizeKB = 5 * 1024 // 5MB default for non-image content
 		}
 	}
 
@@ -226,7 +240,7 @@ func (t *FetchTool) Execute(_ context.Context, args json.RawMessage) (string, er
 	if isImage {
 		maxSizeBytes = t.cfg.MaxImageSizeMB * 1024 * 1024 // Convert MB to bytes
 	} else {
-		maxSizeBytes = t.cfg.MaxTextSizeKB * 1024 // Convert KB to bytes
+		maxSizeBytes = maxSizeKB * 1024 // Convert KB to bytes for non-image content
 	}
 
 	// Limit response size
@@ -241,18 +255,59 @@ func (t *FetchTool) Execute(_ context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("response exceeds maximum size of %d bytes", maxSizeBytes)
 	}
 
+	sizeBytes := len(responseData)
+
 	var content string
 	if isImage {
 		// For images, encode as base64
 		content = base64.StdEncoding.EncodeToString(responseData)
+	} else if strings.EqualFold(mediaType, "application/pdf") {
+		// For PDFs, do not inline raw bytes into the context.
+		// Only return a short metadata description and let pdf_parser handle text extraction.
+		content = fmt.Sprintf("PDF content omitted. type=%s size=%d bytes. Use pdf_parser tool to extract text.", mediaType, sizeBytes)
+	} else if !isTextLikeMediaType(mediaType) {
+		// For other binary-like content, avoid inlining bytes into the chat context.
+		content = fmt.Sprintf("Binary content omitted. type=%s size=%d bytes", mediaType, sizeBytes)
 	} else {
-		// For text content, truncate to max text size if needed
-		textContent := string(responseData)
-		maxTextBytes := t.cfg.MaxTextSizeKB * 1024
-		if len(textContent) > maxTextBytes {
-			textContent = textContent[:maxTextBytes]
+		// For non-image content, optionally transform based on format and content type
+		rawText := string(responseData)
+
+		format := strings.ToLower(strings.TrimSpace(in.Format))
+		if format == "" {
+			if isHTMLMediaType(mediaType) {
+				format = "markdown"
+			} else {
+				format = "text"
+			}
 		}
-		content = textContent
+
+		switch format {
+		case "html":
+			content = rawText
+		case "markdown":
+			if isHTMLMediaType(mediaType) {
+				content = convertHTMLToMarkdown(rawText)
+			} else {
+				content = rawText
+			}
+		case "text":
+			if isHTMLMediaType(mediaType) {
+				content = extractTextFromHTML(rawText)
+			} else {
+				content = rawText
+			}
+		default:
+			content = rawText
+		}
+
+		// Truncate text to a conservative upper bound to keep the JSON result small enough.
+		maxTextBytes := maxSizeKB * 1024
+		if maxTextBytes <= 0 || maxTextBytes > maxJSONTextBytes {
+			maxTextBytes = maxJSONTextBytes
+		}
+		if len(content) > maxTextBytes {
+			content = content[:maxTextBytes]
+		}
 	}
 
 	result := FetchResult{
@@ -261,7 +316,7 @@ func (t *FetchTool) Execute(_ context.Context, args json.RawMessage) (string, er
 		ContentType: contentType,
 		IsImage:     isImage,
 		Content:     content,
-		SizeBytes:   len(responseData),
+		SizeBytes:   sizeBytes,
 	}
 
 	// Handle 401 Unauthorized - try again with auth if available
@@ -270,4 +325,143 @@ func (t *FetchTool) Execute(_ context.Context, args json.RawMessage) (string, er
 	}
 
 	return mustJSON(result), nil
+}
+
+func isHTMLMediaType(mediaType string) bool {
+	if mediaType == "" {
+		return false
+	}
+	switch strings.ToLower(mediaType) {
+	case "text/html", "application/xhtml+xml":
+		return true
+	default:
+		return strings.HasSuffix(strings.ToLower(mediaType), "+html")
+	}
+}
+
+// isTextLikeMediaType 判定一个 mediaType 是否“文本型”，用于决定是否尝试将响应体作为文本解码并送入上下文。
+func isTextLikeMediaType(mediaType string) bool {
+	if strings.TrimSpace(mediaType) == "" {
+		// 没有声明类型时，保守按文本处理，由 maxJSONTextBytes 再兜底截断。
+		return true
+	}
+	mt := strings.ToLower(strings.TrimSpace(mediaType))
+	if strings.HasPrefix(mt, "text/") {
+		return true
+	}
+	if isHTMLMediaType(mt) {
+		return true
+	}
+	switch mt {
+	case "application/json",
+		"application/xml",
+		"application/javascript",
+		"application/x-www-form-urlencoded":
+		return true
+	}
+	return false
+}
+
+func extractTextFromHTML(htmlStr string) string {
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	if err != nil {
+		// Fallback to raw string if parsing fails
+		return htmlStr
+	}
+
+	var b strings.Builder
+	var walk func(*html.Node, bool)
+	walk = func(n *html.Node, skip bool) {
+		if n.Type == html.ElementNode {
+			if isIgnoredHTMLTag(n.Data) {
+				skip = true
+			}
+		}
+
+		if n.Type == html.TextNode && !skip {
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(text)
+			}
+		}
+
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c, skip)
+		}
+	}
+
+	walk(doc, false)
+	return b.String()
+}
+
+func convertHTMLToMarkdown(htmlStr string) string {
+	// Very lightweight HTML -> Markdown conversion built on top of text extraction.
+	// For now, we focus on producing readable markdown without heavy dependencies.
+	doc, err := html.Parse(strings.NewReader(htmlStr))
+	if err != nil {
+		// Fallback to plain text extraction on parse failure
+		return extractTextFromHTML(htmlStr)
+	}
+
+	var b strings.Builder
+
+	var walk func(*html.Node, bool, string)
+	walk = func(n *html.Node, skip bool, prefix string) {
+		if n.Type == html.ElementNode {
+			if isIgnoredHTMLTag(n.Data) {
+				skip = true
+			}
+		}
+
+		if n.Type == html.ElementNode {
+			switch strings.ToLower(n.Data) {
+			case "h1":
+				prefix = "# "
+			case "h2":
+				prefix = "## "
+			case "h3":
+				prefix = "### "
+			case "h4":
+				prefix = "#### "
+			case "h5":
+				prefix = "##### "
+			case "h6":
+				prefix = "###### "
+			case "li":
+				prefix = "- "
+			}
+		}
+
+		if n.Type == html.TextNode && !skip {
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				if prefix != "" {
+					b.WriteString(prefix)
+				}
+				b.WriteString(text)
+			}
+		}
+
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c, skip, prefix)
+		}
+	}
+
+	walk(doc, false, "")
+	return b.String()
+}
+
+func isIgnoredHTMLTag(tag string) bool {
+	switch strings.ToLower(tag) {
+	case "script", "style", "noscript", "iframe", "object", "embed":
+		return true
+	default:
+		return false
+	}
 }
