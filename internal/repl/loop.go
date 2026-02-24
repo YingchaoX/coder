@@ -68,7 +68,7 @@ func Run(loop *Loop) error {
 		var text string
 		var err error
 		if isTTY {
-			text, err = readInputRaw(stdinFd, os.Stdin, stdout)
+			text, err = readInputRaw(stdinFd, os.Stdin, stdout, loop.history)
 		} else {
 			var lines []string
 			lines, err = readInput(stdin)
@@ -192,9 +192,13 @@ const (
 	bpmEnd   = "201~"
 )
 
-// readInputRaw reads from stdin in raw mode: Enter = send; paste multi-line shows [copy N lines], then Enter sends.
-// Caller must pass stdinFd = int(os.Stdin.Fd()). Echoes input to out.
-func readInputRaw(stdinFd int, stdin *os.File, out io.Writer) (string, error) {
+// readInputRaw reads from stdin in raw mode: Enter = send; paste multi-line
+// shows [copy N lines], then Enter sends. Caller must pass
+// stdinFd = int(os.Stdin.Fd()). Echoes input to out. When history is non-nil,
+// Up/Down arrows navigate previously submitted input lines.
+// readInputRaw 在 raw 模式下读取输入：Enter 发送，粘贴多行显示
+// “[copy N lines]” 后 Enter 发送整段；当传入 history 时，↑/↓ 用于在历史输入间切换。
+func readInputRaw(stdinFd int, stdin *os.File, out io.Writer, history []string) (string, error) {
 	oldState, err := term.MakeRaw(stdinFd)
 	if err != nil {
 		return "", err
@@ -207,6 +211,10 @@ func readInputRaw(stdinFd int, stdin *os.File, out io.Writer) (string, error) {
 	defer func() { _, _ = out.Write([]byte(bpmDisable)) }()
 
 	var buf strings.Builder
+	var nav *historyNavigator
+	if len(history) > 0 {
+		nav = newHistoryNavigator(history)
+	}
 	var pendingPaste string
 	pastePending := false
 	rd := bufio.NewReader(stdin)
@@ -357,12 +365,64 @@ func readInputRaw(stdinFd int, stdin *os.File, out io.Writer) (string, error) {
 				buf.Reset()
 				continue
 			}
-			// Other CSI (e.g. arrow keys): discard, do not echo
+			// Arrow keys for history navigation: ESC [ A/B
+			if nav != nil {
+				last := csi[len(csi)-1]
+				switch last {
+				case 'A': // Up: older history
+					current := buf.String()
+					next, ok := nav.Prev()
+					if !ok {
+						break
+					}
+					display := historyDisplayString(next)
+					if current == display {
+						break
+					}
+					if current != "" {
+						clearEchoedInput(out, current)
+					}
+					buf.Reset()
+					buf.WriteString(display)
+					if display != "" {
+						_, _ = out.Write([]byte(display))
+					}
+					continue
+				case 'B': // Down: newer history / fresh input
+					current := buf.String()
+					next, ok := nav.Next()
+					if !ok {
+						break
+					}
+					display := historyDisplayString(next)
+					if current == display {
+						break
+					}
+					if current != "" {
+						clearEchoedInput(out, current)
+					}
+					buf.Reset()
+					buf.WriteString(display)
+					if display != "" {
+						_, _ = out.Write([]byte(display))
+					}
+					continue
+				}
+			}
+			// Other CSI: discard, do not echo
 		default:
 			if pastePending {
+				// Treat printable characters typed after a multi-line paste
+				// as part of the same input instead of cancelling the paste.
+				// 将多行粘贴后的可打印字符视为粘贴内容的追加，而不是丢弃粘贴结果。
+				if nb, ok := appendPrintableToPaste(pendingPaste, b); ok {
+					pendingPaste = nb
+					_, _ = out.Write([]byte{b})
+					continue
+				}
+				// 非可打印字符仍按“取消粘贴”处理，退回普通输入路径。
 				pastePending = false
 				pendingPaste = ""
-				// fall through to accept this key as normal input
 			}
 			buf.WriteByte(b)
 			_, _ = out.Write([]byte{b})
