@@ -33,7 +33,7 @@
 
 - **权限与安全**
   - `internal/security` + `internal/permission` 负责工作区边界、危险命令识别与策略决策。
-  - 策略值 `allow/ask/deny`，支持按工具与 bash pattern 配置，`yolo + bash` 特殊全放行路径。
+  - 仅保留 `build`/`plan` 两套运行预设，`/mode` 与 `/permissions` 联动切换。
 
 - **存储与会话**
   - 使用 SQLite 持久化消息、会话、todo 及权限日志，默认路径 `~/.coder`（可通过配置覆盖）。
@@ -155,7 +155,7 @@ go build -o coder ./cmd/agent
 
 ```text
 context: 0 tokens · model: qwen2.5-coder-32b-instruct
-[default] /path/to/your/workspace>
+[build] /path/to/your/workspace>
 ```
 
 即表示 REPL 已启动成功。
@@ -181,7 +181,7 @@ context: 0 tokens · model: qwen2.5-coder-32b-instruct
 - 特点：
   - 不调用模型，视为“用户自己在 shell 中执行”。
   - 结果以 `[COMMAND]` 区块返回，包含命令回显、exit code、持续时间、stdout/stderr 等。
-  - 仍受工作区边界与 `bash` 工具内部超时/输出截断约束。
+  - 仍受 Agent/Policy/审批链、工作区边界与 `bash` 工具内部超时/输出截断约束。
 
 ### `/` 内建命令
 
@@ -189,8 +189,8 @@ context: 0 tokens · model: qwen2.5-coder-32b-instruct
 
 - `/help`：展示基本使用说明与命令列表。
 - `/model <name>`：切换当前会话模型，并尝试写入 `./.coder/config.json`。
-- `/permissions [preset]`：展示或切换权限预设（如 `strict`、`balanced`、`auto-edit`、`yolo`）。
-- `/mode <name>`：切换模式，也可使用 `/plan`、`/default`、`/auto-edit`、`/yolo` 快捷命令。
+- `/permissions [preset]`：展示或切换权限预设（`build`、`plan`），并联动当前模式。
+- `/mode <build|plan>`：切换模式，也可使用 `/build`、`/plan` 快捷命令。
 - `/tools`：展示当前注册与可用的工具列表。
 - `/skills`：展示当前可用的 Skills 列表。
 - `/todos`：查看当前会话 todo 列表（只读）。
@@ -206,12 +206,10 @@ context: 0 tokens · model: qwen2.5-coder-32b-instruct
 
 ### 模式（REPL /mode）
 
-当前支持四种模式（`internal/orchestrator` 中的 `mode` 字段）：
+当前支持两种模式（`internal/orchestrator` 中的 `mode` 字段）：
 
-- `plan`：仅规划与拆解，默认禁写入（`write/patch`）与高风险命令，不启用自动验证。
-- `default`：均衡模式，写入与高风险操作按策略 `allow/ask/deny` 执行，自动验证仅在用户明确要求时触发。
-- `auto-edit`：偏向交付改动，允许主动读写与自动验证，支持失败后注入修复提示并重试。
-- `yolo`：高自治模式，对 `bash` 走全放行路径，但仍有工作区与基础安全约束。
+- `build`：交付模式，支持代码修改与验证；禁用 `todowrite`（不能设置 todos）。
+- `plan`：规划模式，可联网与规划 todo；禁用写改删相关能力，并限制 `bash` 为只读白名单命令。
 
 模式会直接体现在提示符第二行的 `[mode]` 部分。
 

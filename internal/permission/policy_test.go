@@ -67,3 +67,18 @@ func TestPolicyDecide_CommandAllowlist(t *testing.T) {
 		t.Fatalf("bash decision with allowlist=%s, want allow", got)
 	}
 }
+
+func TestPresetConfigModes(t *testing.T) {
+	if _, ok := PresetConfig("build"); !ok {
+		t.Fatal("build preset should exist")
+	}
+	if _, ok := PresetConfig("plan"); !ok {
+		t.Fatal("plan preset should exist")
+	}
+	if _, ok := PresetConfig("balanced"); ok {
+		t.Fatal("balanced preset should not exist")
+	}
+	if _, ok := PresetConfig("yolo"); ok {
+		t.Fatal("yolo preset should not exist")
+	}
+}

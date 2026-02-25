@@ -19,18 +19,24 @@ func Builtins() map[string]Profile {
 	build := Profile{
 		Name:        "build",
 		Mode:        "primary",
-		Description: "Full workflow agent",
+		Description: "Delivery-focused primary agent",
 		ToolEnabled: defaultToolSet(true),
 	}
+	// Build mode can read todo state but cannot plan/update todos.
+	build.ToolEnabled["todowrite"] = false
+
 	plan := Profile{
 		Name:        "plan",
 		Mode:        "primary",
-		Description: "Read-focused planning agent",
+		Description: "Read-only planning primary agent",
 		ToolEnabled: defaultToolSet(true),
 	}
 	plan.ToolEnabled["write"] = false
 	plan.ToolEnabled["edit"] = false
 	plan.ToolEnabled["patch"] = false
+	plan.ToolEnabled["task"] = false
+	plan.ToolEnabled["git_add"] = false
+	plan.ToolEnabled["git_commit"] = false
 
 	general := Profile{
 		Name:        "general",
@@ -130,17 +136,27 @@ func parseToolDecision(raw string) bool {
 
 func defaultToolSet(v bool) map[string]bool {
 	return map[string]bool{
-		"read":      v,
-		"edit":      v,
-		"write":     v,
-		"list":      v,
-		"glob":      v,
-		"grep":      v,
-		"patch":     v,
-		"bash":      v,
-		"skill":     v,
-		"task":      v,
-		"todoread":  v,
-		"todowrite": v,
+		"read":            v,
+		"edit":            v,
+		"write":           v,
+		"list":            v,
+		"glob":            v,
+		"grep":            v,
+		"patch":           v,
+		"bash":            v,
+		"skill":           v,
+		"task":            v,
+		"todoread":        v,
+		"todowrite":       v,
+		"lsp_diagnostics": v,
+		"lsp_definition":  v,
+		"lsp_hover":       v,
+		"git_status":      v,
+		"git_diff":        v,
+		"git_log":         v,
+		"git_add":         v,
+		"git_commit":      v,
+		"fetch":           v,
+		"pdf_parser":      v,
 	}
 }

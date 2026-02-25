@@ -339,8 +339,33 @@ func (o *Orchestrator) buildProviderMessages() []chat.Message {
 	if o.assembler != nil {
 		out = append(out, o.assembler.StaticMessages()...)
 	}
+	if modeMsg := o.runtimeModeSystemMessage(); strings.TrimSpace(modeMsg.Content) != "" {
+		out = append(out, modeMsg)
+	}
 	out = append(out, o.messages...)
 	return out
+}
+
+func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
+	switch o.CurrentMode() {
+	case "plan":
+		return chat.Message{
+			Role: "system",
+			Content: "[RUNTIME_MODE]\n" +
+				"Current mode is PLAN.\n" +
+				"- You may read/analyze code, use fetch for web access, and manage todos.\n" +
+				"- You must NOT perform repository mutations (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
+				"- If user asks for implementation, provide an actionable plan and required changes.",
+		}
+	default:
+		return chat.Message{
+			Role: "system",
+			Content: "[RUNTIME_MODE]\n" +
+				"Current mode is BUILD.\n" +
+				"- Focus on implementing and validating changes.\n" +
+				"- Do NOT create or update todos in this mode (todowrite is plan-only).",
+		}
+	}
 }
 
 func (o *Orchestrator) hasSessionTodos(ctx context.Context) (bool, error) {

@@ -15,6 +15,7 @@ import (
 	"coder/internal/chat"
 	"coder/internal/config"
 	"coder/internal/contextmgr"
+	"coder/internal/permission"
 	"coder/internal/provider"
 	"coder/internal/storage"
 	"coder/internal/tools"
@@ -320,6 +321,29 @@ func TestRunInputBangDeniedPersistsResult(t *testing.T) {
 	}
 }
 
+func TestRunInputBangRespectsPolicyPreset(t *testing.T) {
+	registry := tools.NewRegistry(tools.NewBashTool(t.TempDir(), 2000, 1<<20))
+	pol := permission.New(config.PermissionConfig{Default: "ask", Bash: map[string]string{"*": "ask"}})
+	orch := New(nil, registry, Options{Policy: pol})
+	orch.SetMode("plan")
+
+	got, err := orch.RunInput(context.Background(), "! echo hi", nil)
+	if err != nil {
+		t.Fatalf("RunInput failed: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(got), "command mode denied") {
+		t.Fatalf("expected policy denial, got: %q", got)
+	}
+
+	got, err = orch.RunInput(context.Background(), "! ls", nil)
+	if err != nil {
+		t.Fatalf("RunInput failed: %v", err)
+	}
+	if strings.Contains(strings.ToLower(got), "command mode denied") {
+		t.Fatalf("ls should be allowed in plan whitelist, got: %q", got)
+	}
+}
+
 func TestCurrentContextStats(t *testing.T) {
 	orch := New(nil, tools.NewRegistry(), Options{
 		ContextTokenLimit: 1000,
@@ -335,7 +359,7 @@ func TestCurrentContextStats(t *testing.T) {
 	if stats.EstimatedTokens <= 0 {
 		t.Fatalf("estimated=%d", stats.EstimatedTokens)
 	}
-	if stats.MessageCount != 2 {
+	if stats.MessageCount != 3 {
 		t.Fatalf("message count=%d", stats.MessageCount)
 	}
 }
@@ -771,7 +795,7 @@ func TestSessionIDAccessors(t *testing.T) {
 func TestModeAccessors(t *testing.T) {
 	orch := New(nil, tools.NewRegistry(), Options{})
 
-	if got := orch.CurrentMode(); got != "default" {
+	if got := orch.CurrentMode(); got != "build" {
 		t.Fatalf("default mode=%q", got)
 	}
 
@@ -780,15 +804,67 @@ func TestModeAccessors(t *testing.T) {
 		t.Fatalf("after SetMode(plan) got %q", got)
 	}
 
-	orch.SetMode("  auto-edit ")
-	if got := orch.CurrentMode(); got != "auto-edit" {
-		t.Fatalf("after SetMode(auto-edit) got %q", got)
+	orch.SetMode("  build ")
+	if got := orch.CurrentMode(); got != "build" {
+		t.Fatalf("after SetMode(build) got %q", got)
 	}
 
 	// invalid mode should be ignored and keep previous value
 	orch.SetMode("invalid-mode")
-	if got := orch.CurrentMode(); got != "auto-edit" {
+	if got := orch.CurrentMode(); got != "build" {
 		t.Fatalf("invalid mode should not change value, got %q", got)
+	}
+}
+
+func TestSlashModeAndPermissionsSync(t *testing.T) {
+	pol := permission.New(config.PermissionConfig{
+		Default: "ask",
+		Bash:    map[string]string{"*": "ask"},
+	})
+	orch := New(nil, tools.NewRegistry(), Options{
+		Policy: pol,
+	})
+
+	got, err := orch.RunInput(context.Background(), "/mode plan", nil)
+	if err != nil {
+		t.Fatalf("mode plan failed: %v", err)
+	}
+	if !strings.Contains(got, "Mode set to plan") {
+		t.Fatalf("unexpected /mode output: %q", got)
+	}
+	if orch.ActiveAgent().Name != "plan" {
+		t.Fatalf("active agent=%q, want plan", orch.ActiveAgent().Name)
+	}
+	if decision := orch.policy.Decide("bash", json.RawMessage(`{"command":"git add ."}`)).Decision; decision != permission.DecisionDeny {
+		t.Fatalf("plan preset should deny mutating bash command, got %s", decision)
+	}
+
+	got, err = orch.RunInput(context.Background(), "/permissions build", nil)
+	if err != nil {
+		t.Fatalf("permissions build failed: %v", err)
+	}
+	if !strings.Contains(got, "Permissions set to preset: build") {
+		t.Fatalf("unexpected /permissions output: %q", got)
+	}
+	if orch.CurrentMode() != "build" {
+		t.Fatalf("mode=%q, want build", orch.CurrentMode())
+	}
+	if orch.ActiveAgent().Name != "build" {
+		t.Fatalf("active agent=%q, want build", orch.ActiveAgent().Name)
+	}
+}
+
+func TestModeControlsTodoWriteAvailability(t *testing.T) {
+	orch := New(nil, tools.NewRegistry(), Options{})
+	if orch.CurrentMode() != "build" {
+		t.Fatalf("mode=%q", orch.CurrentMode())
+	}
+	if orch.isToolAllowed("todowrite") {
+		t.Fatal("build mode should disable todowrite")
+	}
+	orch.SetMode("plan")
+	if !orch.isToolAllowed("todowrite") {
+		t.Fatal("plan mode should allow todowrite")
 	}
 }
 

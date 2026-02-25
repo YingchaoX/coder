@@ -79,6 +79,15 @@ func Run(loop *Loop) error {
 		if err != nil {
 			return err
 		}
+		if text == tabModeToggleToken {
+			next := "build"
+			if strings.EqualFold(orch.CurrentMode(), "build") {
+				next = "plan"
+			}
+			orch.SetMode(next)
+			_, _ = fmt.Fprintf(stdout, "\nMode set to %s\n", next)
+			continue
+		}
 		if text == "" {
 			continue
 		}
@@ -153,7 +162,7 @@ func (loop *Loop) updatePromptState(orch *orchestrator.Orchestrator) {
 // printPromptTo writes the two-line prompt to w (per doc 09).
 func (loop *Loop) printPromptTo(w io.Writer) {
 	model := loop.Model
-	mode := "default"
+	mode := "build"
 	if loop.Orch != nil {
 		if m := loop.Orch.CurrentModel(); m != "" {
 			model = m
@@ -191,6 +200,8 @@ const (
 	bpmStart = "200~"
 	bpmEnd   = "201~"
 )
+
+const tabModeToggleToken = "__CODER_REPL_TOGGLE_MODE__"
 
 // readInputRaw reads from stdin in raw mode: Enter = send; paste multi-line
 // shows [copy N lines], then Enter sends. Caller must pass
@@ -261,6 +272,12 @@ func readInputRaw(stdinFd int, stdin *os.File, out io.Writer, history []string) 
 			// 使用 \r\n 保证光标回到行首并换到下一行，避免 [TOOL] 等输出缩进错位。
 			_, _ = out.Write([]byte("\r\n"))
 			return lineSoFar, nil
+		case '\t':
+			if !pastePending && buf.Len() == 0 {
+				return tabModeToggleToken, nil
+			}
+			buf.WriteByte(b)
+			_, _ = out.Write([]byte{b})
 		case 0x1b:
 			if pastePending {
 				pastePending = false

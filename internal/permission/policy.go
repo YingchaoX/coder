@@ -226,33 +226,33 @@ func (p *Policy) Summary() string {
 	return strings.Join(parts, ", ")
 }
 
-// PresetConfig 返回命名预设的权限配置；name 为 strict | balanced | auto-edit | yolo
+// PresetConfig 返回命名预设的权限配置；name 为 build | plan
 func PresetConfig(name string) (config.PermissionConfig, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch name {
-	case "strict":
-		return config.PermissionConfig{
-			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny",
-			TodoRead: "allow", TodoWrite: "deny", Skill: "deny", Task: "deny", Fetch: "deny",
-			Bash: map[string]string{"*": "deny"},
-		}, true
-	case "balanced":
+	case "build":
 		return config.PermissionConfig{
 			Default: "ask", Read: "allow", Edit: "ask", Write: "ask", Patch: "ask",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask", Fetch: "ask",
-			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
+			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow", "pnpm test*": "allow", "yarn test*": "allow"},
 		}, true
-	case "auto-edit":
+	case "plan":
 		return config.PermissionConfig{
-			Default: "allow", Read: "allow", Edit: "allow", Write: "allow", Patch: "allow",
-			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow", Fetch: "allow",
-			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow"},
-		}, true
-	case "yolo":
-		return config.PermissionConfig{
-			Default: "allow", Read: "allow", Edit: "allow", Write: "allow", Patch: "allow",
-			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "allow", Fetch: "allow",
-			Bash: map[string]string{"*": "allow"},
+			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "deny", Fetch: "allow",
+			Bash: map[string]string{
+				"*":            "deny",
+				"ls":           "allow",
+				"ls *":         "allow",
+				"cat *":        "allow",
+				"grep *":       "allow",
+				"git status":   "allow",
+				"git status *": "allow",
+				"git diff":     "allow",
+				"git diff *":   "allow",
+				"git log":      "allow",
+				"git log *":    "allow",
+			},
 		}, true
 	default:
 		return config.PermissionConfig{}, false

@@ -23,10 +23,8 @@ var EnMessages = map[string]string{
 	"status.expand_hint": "expand",
 
 	// UI - Mode (REPL /mode or TUI Tab)
-	"mode.plan":      "plan",
-	"mode.default":   "default",
-	"mode.auto-edit": "auto-edit",
-	"mode.yolo":      "yolo",
+	"mode.build": "build",
+	"mode.plan":  "plan",
 
 	// UI (TUI sidebar 5 modules)
 	"sidebar.tools":  "Tools",
