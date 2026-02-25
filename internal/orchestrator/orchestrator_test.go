@@ -883,7 +883,7 @@ func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
 		if msg.Role == "tool" && msg.Name == "bash" {
 			if strings.Contains(msg.Content, `"denied":true`) {
 				bashDenied++
-				if !strings.Contains(msg.Content, "plan mode setup flow") {
+				if !strings.Contains(msg.Content, "do not run bash automatically") {
 					t.Fatalf("unexpected deny reason: %q", msg.Content)
 				}
 				continue
@@ -893,23 +893,23 @@ func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
 			}
 		}
 	}
-	if !foundTodoWrite {
-		t.Fatal("expected auto-initialized todo write in plan mode setup request")
+	if foundTodoWrite {
+		t.Fatal("did not expect todo initialization before successful information gathering")
 	}
-	if len(toolOrder) < 2 || toolOrder[0] != "bash" || toolOrder[1] != "todowrite" {
-		t.Fatalf("expected info gathering before todo init, tool order=%v", toolOrder)
+	if len(toolOrder) == 0 || toolOrder[0] != "bash" {
+		t.Fatalf("expected bash tool attempt to be blocked, tool order=%v", toolOrder)
 	}
-	if bashSuccess != 1 {
-		t.Fatalf("expected exactly one successful bash call, got %d", bashSuccess)
+	if bashSuccess != 0 {
+		t.Fatalf("expected no successful bash call in setup plan mode, got %d", bashSuccess)
 	}
-	if bashDenied != 1 {
-		t.Fatalf("expected second bash call to be denied, got %d denied", bashDenied)
+	if bashDenied != 2 {
+		t.Fatalf("expected both bash calls to be denied, got %d denied", bashDenied)
 	}
 }
 
 func TestRunTurnPlanBlocksTodoWriteBeforeInfoGathering(t *testing.T) {
 	registry := tools.NewRegistry(
-		mockTool{name: "bash", result: `{"ok":true,"exit_code":0,"duration_ms":1,"stdout":"Darwin\n","stderr":""}`},
+		mockTool{name: "fetch", result: `{"ok":true,"url":"https://example.com","status":200,"content":"ok"}`},
 		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
 		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"收集环境信息并确认安装目标/约束","status":"in_progress"}]}`},
 	)
@@ -931,11 +931,11 @@ func TestRunTurnPlanBlocksTodoWriteBeforeInfoGathering(t *testing.T) {
 			{
 				ToolCalls: []chat.ToolCall{
 					{
-						ID:   "call_bash_uname",
+						ID:   "call_fetch_probe",
 						Type: "function",
 						Function: chat.ToolCallFunction{
-							Name:      "bash",
-							Arguments: `{"command":"uname"}`,
+							Name:      "fetch",
+							Arguments: `{"url":"https://example.com"}`,
 						},
 					},
 				},
