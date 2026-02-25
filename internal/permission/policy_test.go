@@ -110,3 +110,37 @@ func TestPresetConfigPlanBashRules(t *testing.T) {
 		}
 	}
 }
+
+func TestPresetConfigPlanReadToolsAllowed(t *testing.T) {
+	cfg, ok := PresetConfig("plan")
+	if !ok {
+		t.Fatal("plan preset should exist")
+	}
+	p := New(cfg)
+
+	cases := []struct {
+		tool string
+		want Decision
+	}{
+		{tool: "read", want: DecisionAllow},
+		{tool: "list", want: DecisionAllow},
+		{tool: "glob", want: DecisionAllow},
+		{tool: "grep", want: DecisionAllow},
+		{tool: "lsp_diagnostics", want: DecisionAllow},
+		{tool: "lsp_definition", want: DecisionAllow},
+		{tool: "lsp_hover", want: DecisionAllow},
+		{tool: "git_status", want: DecisionAllow},
+		{tool: "git_diff", want: DecisionAllow},
+		{tool: "git_log", want: DecisionAllow},
+		{tool: "pdf_parser", want: DecisionAllow},
+		{tool: "git_add", want: DecisionDeny},
+		{tool: "git_commit", want: DecisionDeny},
+	}
+
+	for _, tc := range cases {
+		got := p.Decide(tc.tool, nil).Decision
+		if got != tc.want {
+			t.Fatalf("plan decision for %q = %s, want %s", tc.tool, got, tc.want)
+		}
+	}
+}

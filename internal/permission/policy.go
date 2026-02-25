@@ -128,6 +128,16 @@ func (p *Policy) toolRule(tool string) string {
 		return p.cfg.Task
 	case "fetch":
 		return p.cfg.Fetch
+	case "lsp_diagnostics":
+		return p.cfg.LSPDiagnostics
+	case "lsp_definition":
+		return p.cfg.LSPDefinition
+	case "lsp_hover":
+		return p.cfg.LSPHover
+	case "git_status", "git_diff", "git_log", "pdf_parser":
+		return p.cfg.Read
+	case "git_add", "git_commit":
+		return p.cfg.Write
 	default:
 		return p.cfg.Default
 	}
@@ -209,12 +219,18 @@ func (p *Policy) Summary() string {
 		"read: " + p.cfg.Read,
 		"edit: " + p.cfg.Edit,
 		"write: " + p.cfg.Write,
+		"list: " + p.cfg.List,
+		"glob: " + p.cfg.Glob,
+		"grep: " + p.cfg.Grep,
 		"patch: " + p.cfg.Patch,
 		"todoread: " + p.cfg.TodoRead,
 		"todowrite: " + p.cfg.TodoWrite,
 		"skill: " + p.cfg.Skill,
 		"task: " + p.cfg.Task,
 		"fetch: " + p.cfg.Fetch,
+		"lsp_diagnostics: " + p.cfg.LSPDiagnostics,
+		"lsp_definition: " + p.cfg.LSPDefinition,
+		"lsp_hover: " + p.cfg.LSPHover,
 	}
 	bashDef := def
 	if p.cfg.Bash != nil {
@@ -232,13 +248,15 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 	switch name {
 	case "build":
 		return config.PermissionConfig{
-			Default: "ask", Read: "allow", Edit: "ask", Write: "ask", Patch: "ask",
+			Default: "ask", Read: "allow", Edit: "ask", Write: "ask", List: "allow", Glob: "allow", Grep: "allow", Patch: "ask",
+			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask", Fetch: "ask",
 			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow", "pnpm test*": "allow", "yarn test*": "allow"},
 		}, true
 	case "plan":
 		return config.PermissionConfig{
-			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny",
+			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", List: "allow", Glob: "allow", Grep: "allow", Patch: "deny",
+			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "deny", Fetch: "allow",
 			Bash: map[string]string{
 				"*":            "ask",
