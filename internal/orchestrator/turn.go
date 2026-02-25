@@ -30,12 +30,21 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 	turnEditedCode := false
 	editedPaths := make([]string, 0, 4)
 	verifyAttempts := 0
-	requireTodoFirst := o.workflow.RequireTodoForComplex &&
-		o.registry.Has("todoread") &&
+	todoToolsReady := o.registry.Has("todoread") &&
 		o.registry.Has("todowrite") &&
 		o.isToolAllowed("todoread") &&
-		o.isToolAllowed("todowrite") &&
+		o.isToolAllowed("todowrite")
+	requireTodoFirst := o.workflow.RequireTodoForComplex &&
+		todoToolsReady &&
 		isComplexTask(userInput)
+	if !requireTodoFirst &&
+		o.CurrentMode() == "plan" &&
+		todoToolsReady &&
+		shouldRequireTodoInPlan(userInput) {
+		requireTodoFirst = true
+	}
+	planSetupTask := o.CurrentMode() == "plan" && isEnvironmentSetupTask(userInput)
+	planSetupBashUsed := false
 
 	if requireTodoFirst {
 		o.ensureSessionTodos(ctx, userInput, out)
@@ -172,6 +181,14 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				o.appendToolDenied(call, reason)
 				continue
 			}
+			if planSetupTask && call.Function.Name == "bash" && planSetupBashUsed {
+				reason := "plan mode setup flow: skip additional bash probing and continue with todo planning"
+				if out != nil {
+					renderToolBlocked(out, reason)
+				}
+				o.appendToolDenied(call, reason)
+				continue
+			}
 
 			args := json.RawMessage(call.Function.Arguments)
 			decision := permission.Result{Decision: permission.DecisionAllow}
@@ -262,6 +279,9 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			}
 			if o.onToolEvent != nil {
 				o.onToolEvent(call.Function.Name, resultSummary, true)
+			}
+			if planSetupTask && call.Function.Name == "bash" {
+				planSetupBashUsed = true
 			}
 			o.appendMessage(chat.Message{
 				Role:       "tool",
@@ -354,7 +374,9 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 			Content: "[RUNTIME_MODE]\n" +
 				"Current mode is PLAN.\n" +
 				"- You may read/analyze code, use fetch for web access, manage todos, and run read-only diagnostic bash commands (for example: uname, pwd, id) when needed.\n" +
+				"- For actionable requests, todos are the primary output. Create or update todos first, then explain the plan.\n" +
 				"- For environment/setup requests (install/uninstall/configure software), do NOT execute shell commands directly. Ask clarifying questions first and provide a concrete plan.\n" +
+				"- In setup requests, run at most one optional diagnostic bash command, then continue with todo planning (no follow-up version/install checks in the same turn).\n" +
 				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
 				"- If user asks for implementation, provide an actionable plan and required changes.",
 		}

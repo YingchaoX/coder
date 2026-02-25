@@ -630,6 +630,45 @@ func TestIsComplexTask(t *testing.T) {
 	}
 }
 
+func TestShouldRequireTodoInPlan(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"", false},
+		{"你好", false},
+		{"what time is it", false},
+		{"安装 python", true},
+		{"请给我一个迁移计划", true},
+		{"step by step refactor", true},
+	}
+	for _, tc := range tests {
+		got := shouldRequireTodoInPlan(tc.input)
+		if got != tc.want {
+			t.Fatalf("shouldRequireTodoInPlan(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestIsEnvironmentSetupTask(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"安装 python", true},
+		{"configure python environment", true},
+		{"brew install python", true},
+		{"修复 parser bug", false},
+		{"read README", false},
+	}
+	for _, tc := range tests {
+		got := isEnvironmentSetupTask(tc.input)
+		if got != tc.want {
+			t.Fatalf("isEnvironmentSetupTask(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestIsChattyGreeting(t *testing.T) {
 	tests := []struct {
 		input string
@@ -755,6 +794,80 @@ func TestShortQuoteOrDashFirstLine(t *testing.T) {
 	}
 	if firstLine("\n\n  first  \nsecond") != "first" {
 		t.Fatalf("firstLine: %q", firstLine("\n\n  first  \nsecond"))
+	}
+}
+
+func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "bash", result: `{"ok":true,"exit_code":0,"duration_ms":1,"stdout":"Darwin\n","stderr":""}`},
+		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
+		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"确认环境与目标","status":"in_progress"}]}`},
+	)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{
+				ToolCalls: []chat.ToolCall{
+					{
+						ID:   "call_bash_uname",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "bash",
+							Arguments: `{"command":"uname"}`,
+						},
+					},
+					{
+						ID:   "call_bash_python",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "bash",
+							Arguments: `{"command":"python3 --version"}`,
+						},
+					},
+				},
+			},
+			{Content: "已生成计划并同步 todos。"},
+		},
+	}
+	orch := New(prov, registry, Options{MaxSteps: 4})
+	orch.SetMode("plan")
+
+	got, err := orch.RunTurn(context.Background(), "安装 python", nil)
+	if err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if !strings.Contains(got, "todos") {
+		t.Fatalf("unexpected final output: %q", got)
+	}
+
+	foundTodoWrite := false
+	bashSuccess := 0
+	bashDenied := 0
+	for _, msg := range orch.messages {
+		if msg.Role == "tool" && msg.Name == "todowrite" {
+			foundTodoWrite = true
+		}
+		if msg.Role == "tool" && msg.Name == "bash" {
+			if strings.Contains(msg.Content, `"denied":true`) {
+				bashDenied++
+				if !strings.Contains(msg.Content, "plan mode setup flow") {
+					t.Fatalf("unexpected deny reason: %q", msg.Content)
+				}
+				continue
+			}
+			if strings.Contains(msg.Content, `"exit_code":0`) {
+				bashSuccess++
+			}
+		}
+	}
+	if !foundTodoWrite {
+		t.Fatal("expected auto-initialized todo write in plan mode setup request")
+	}
+	if bashSuccess != 1 {
+		t.Fatalf("expected exactly one successful bash call, got %d", bashSuccess)
+	}
+	if bashDenied != 1 {
+		t.Fatalf("expected second bash call to be denied, got %d denied", bashDenied)
 	}
 }
 

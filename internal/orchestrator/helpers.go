@@ -476,6 +476,38 @@ func isComplexTask(input string) bool {
 	return len(strings.Fields(trimmed)) >= 14
 }
 
+func shouldRequireTodoInPlan(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return false
+	}
+	if isChattyGreeting(trimmed) {
+		return false
+	}
+	if isComplexTask(trimmed) {
+		return true
+	}
+	if isEnvironmentSetupTask(trimmed) {
+		return true
+	}
+	return containsAnyFold(trimmed, []string{
+		"todo", "todos", "plan", "roadmap", "steps",
+		"计划", "规划", "步骤", "方案", "拆解",
+	})
+}
+
+func isEnvironmentSetupTask(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return false
+	}
+	return containsAnyFold(trimmed, []string{
+		"install", "uninstall", "setup", "set up", "configure", "configuration",
+		"brew", "apt", "yum", "dnf", "pacman", "pip", "conda", "pyenv", "nvm", "asdf",
+		"安装", "卸载", "配置", "环境", "依赖",
+	})
+}
+
 // isChattyGreeting 判断输入是否是闲聊/简单问候，不需要使用工具
 // 泛化性判断：短文本（<30字符）、仅包含问候/寒暄/简单问好的模式、没有具体任务指令
 func isChattyGreeting(input string) bool {
