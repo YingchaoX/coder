@@ -226,4 +226,3 @@ func extractTextFromPDF(path string, maxChars int) (string, bool, error) {
 	}
 	return string(runes[:maxChars]), true, nil
 }
-
