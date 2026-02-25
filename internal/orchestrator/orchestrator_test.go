@@ -324,15 +324,28 @@ func TestRunInputBangDeniedPersistsResult(t *testing.T) {
 func TestRunInputBangRespectsPolicyPreset(t *testing.T) {
 	registry := tools.NewRegistry(tools.NewBashTool(t.TempDir(), 2000, 1<<20))
 	pol := permission.New(config.PermissionConfig{Default: "ask", Bash: map[string]string{"*": "ask"}})
-	orch := New(nil, registry, Options{Policy: pol})
+	approvalCalls := 0
+	orch := New(nil, registry, Options{
+		Policy: pol,
+		OnApproval: func(_ context.Context, req tools.ApprovalRequest) (bool, error) {
+			approvalCalls++
+			if req.Tool != "bash" {
+				t.Fatalf("unexpected approval tool: %s", req.Tool)
+			}
+			return true, nil
+		},
+	})
 	orch.SetMode("plan")
 
 	got, err := orch.RunInput(context.Background(), "! echo hi", nil)
 	if err != nil {
 		t.Fatalf("RunInput failed: %v", err)
 	}
-	if !strings.Contains(strings.ToLower(got), "command mode denied") {
-		t.Fatalf("expected policy denial, got: %q", got)
+	if strings.Contains(strings.ToLower(got), "command mode denied") {
+		t.Fatalf("echo should be approval-based (not hard denied), got: %q", got)
+	}
+	if approvalCalls == 0 {
+		t.Fatal("expected approval callback for ask command")
 	}
 
 	got, err = orch.RunInput(context.Background(), "! ls", nil)
@@ -835,8 +848,8 @@ func TestSlashModeAndPermissionsSync(t *testing.T) {
 	if orch.ActiveAgent().Name != "plan" {
 		t.Fatalf("active agent=%q, want plan", orch.ActiveAgent().Name)
 	}
-	if decision := orch.policy.Decide("bash", json.RawMessage(`{"command":"git add ."}`)).Decision; decision != permission.DecisionDeny {
-		t.Fatalf("plan preset should deny mutating bash command, got %s", decision)
+	if decision := orch.policy.Decide("bash", json.RawMessage(`{"command":"git add ."}`)).Decision; decision != permission.DecisionAsk {
+		t.Fatalf("plan preset should require approval for non-whitelisted bash command, got %s", decision)
 	}
 
 	got, err = orch.RunInput(context.Background(), "/permissions build", nil)

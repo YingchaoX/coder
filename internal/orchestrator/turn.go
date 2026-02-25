@@ -353,8 +353,8 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 			Role: "system",
 			Content: "[RUNTIME_MODE]\n" +
 				"Current mode is PLAN.\n" +
-				"- You may read/analyze code, use fetch for web access, and manage todos.\n" +
-				"- You must NOT perform repository mutations (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
+				"- You may read/analyze code, use fetch for web access, manage todos, and run read-only diagnostic bash commands (for example: uname, pwd, id).\n" +
+				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
 				"- If user asks for implementation, provide an actionable plan and required changes.",
 		}
 	default:

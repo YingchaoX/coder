@@ -209,7 +209,7 @@ context: 0 tokens · model: qwen2.5-coder-32b-instruct
 当前支持两种模式（`internal/orchestrator` 中的 `mode` 字段）：
 
 - `build`：交付模式，支持代码修改与验证；禁用 `todowrite`（不能设置 todos）。
-- `plan`：规划模式，可联网与规划 todo；禁用写改删相关能力，并限制 `bash` 为只读白名单命令。
+- `plan`：规划模式，可联网与规划 todo；禁用写改删相关工具能力；`bash` 对白名单命令直接放行，其它命令走审批。
 
 模式会直接体现在提示符第二行的 `[mode]` 部分。
 

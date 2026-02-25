@@ -37,13 +37,17 @@
   - 禁用 `todowrite`（不能设置 todos）。
 - `plan`
   - 目标：规划与分析。
-  - 硬阻断写改删：禁用 `edit/write/patch/task` 与变更型 git 工具。
+  - 工具层阻断写改删：禁用 `edit/write/patch/task` 与变更型 git 工具。
   - 允许联网（`fetch`）与 todo 规划（`todoread/todowrite`）。
-  - `bash` 仅允许只读白名单命令（如 `ls/cat/grep/git status|diff|log`）。
+  - `bash` 使用白名单直通 + 非白名单审批：
+    - 白名单（如 `ls/cat/grep/git status|diff|log/uname/pwd/id`）直接执行。
+    - 其他命令默认 `ask`，走审批后执行。
 
 ## 6. `!` 命令分支
 - 直接调用 `bash` 工具，不发模型请求。
-- 视为用户直接在终端执行 shell：**不经过策略层与风险审批链**，仅受工作区路径等基础安全约束（详见《04-安全与权限规则》中的“命令模式 `!`”小节）。
+- 经过与普通 `bash` 一致的策略与审批链：
+  - Policy 决策（`allow/ask/deny`）
+  - 工具层风险审批（如危险命令与重定向覆盖检查）
 - 返回结构化执行结果（命令、exit code、stdout/stderr）。
 
 ## 7. `/` 命令分支

@@ -82,3 +82,31 @@ func TestPresetConfigModes(t *testing.T) {
 		t.Fatal("yolo preset should not exist")
 	}
 }
+
+func TestPresetConfigPlanBashRules(t *testing.T) {
+	cfg, ok := PresetConfig("plan")
+	if !ok {
+		t.Fatal("plan preset should exist")
+	}
+	p := New(cfg)
+
+	cases := []struct {
+		command string
+		want    Decision
+	}{
+		{command: "uname", want: DecisionAllow},
+		{command: "uname -a", want: DecisionAllow},
+		{command: "python -V", want: DecisionAsk},
+		{command: "touch a.txt", want: DecisionAsk},
+		{command: "echo hi > a.txt", want: DecisionAsk},
+		{command: "git add .", want: DecisionAsk},
+	}
+
+	for _, tc := range cases {
+		raw := json.RawMessage(`{"command":"` + tc.command + `"}`)
+		got := p.Decide("bash", raw).Decision
+		if got != tc.want {
+			t.Fatalf("plan bash decision for %q = %s, want %s", tc.command, got, tc.want)
+		}
+	}
+}
