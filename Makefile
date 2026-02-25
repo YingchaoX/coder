@@ -47,9 +47,10 @@ lint: fmt vet
 clean:
 	rm -rf bin/ coverage.out
 
-# 跨平台构建 / Cross-platform build
+# 跨平台构建（CGO_ENABLED=0 避免依赖目标机 glibc 版本，兼容旧 Linux）
+# Cross-platform build (CGO_ENABLED=0 for glibc-independent binary on older Linux)
 build-all:
-	GOOS=linux GOARCH=amd64 go build -o bin/coder-linux-amd64 ./cmd/agent
-	GOOS=linux GOARCH=arm64 go build -o bin/coder-linux-arm64 ./cmd/agent
-	GOOS=darwin GOARCH=amd64 go build -o bin/coder-darwin-amd64 ./cmd/agent
-	GOOS=darwin GOARCH=arm64 go build -o bin/coder-darwin-arm64 ./cmd/agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/coder-linux-amd64 ./cmd/agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o bin/coder-linux-arm64 ./cmd/agent
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o bin/coder-darwin-amd64 ./cmd/agent
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o bin/coder-darwin-arm64 ./cmd/agent
