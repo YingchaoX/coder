@@ -893,17 +893,17 @@ func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
 			}
 		}
 	}
-	if foundTodoWrite {
-		t.Fatal("did not expect todo initialization before successful information gathering")
+	if !foundTodoWrite {
+		t.Fatal("expected todo initialization after information gathering")
 	}
-	if len(toolOrder) == 0 || toolOrder[0] != "bash" {
-		t.Fatalf("expected bash tool attempt to be blocked, tool order=%v", toolOrder)
+	if len(toolOrder) < 3 || toolOrder[0] != "bash" || toolOrder[1] != "todowrite" || toolOrder[2] != "bash" {
+		t.Fatalf("expected order [bash, todowrite, bash], got %v", toolOrder)
 	}
-	if bashSuccess != 0 {
-		t.Fatalf("expected no successful bash call in setup plan mode, got %d", bashSuccess)
+	if bashSuccess != 2 {
+		t.Fatalf("expected successful bash calls in setup plan mode, got %d", bashSuccess)
 	}
-	if bashDenied != 2 {
-		t.Fatalf("expected both bash calls to be denied, got %d denied", bashDenied)
+	if bashDenied != 0 {
+		t.Fatalf("expected no denied bash call, got %d denied", bashDenied)
 	}
 }
 
@@ -972,6 +972,71 @@ func TestRunTurnPlanBlocksTodoWriteBeforeInfoGathering(t *testing.T) {
 	}
 	if !seenAutoTodoWrite {
 		t.Fatal("expected auto todo initialization after info gathering")
+	}
+}
+
+func TestRecoverToolCallsFromContent_TaggedFunction(t *testing.T) {
+	content := "I will run a command.\n<tool_call>\n<function=bash>\n<parameter=command>\nuname\n</parameter>\n</function>\n</tool_call>"
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	calls, cleaned := recoverToolCallsFromContent(content, defs)
+	if len(calls) != 1 {
+		t.Fatalf("recovered calls=%d, want 1", len(calls))
+	}
+	if calls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool name: %+v", calls[0])
+	}
+	if calls[0].Function.Arguments != `{"command":"uname"}` {
+		t.Fatalf("unexpected args: %s", calls[0].Function.Arguments)
+	}
+	if strings.Contains(cleaned, "<tool_call>") {
+		t.Fatalf("expected cleaned content without tool_call block, got %q", cleaned)
+	}
+}
+
+func TestRecoverToolCallsFromContent_JSONStyle(t *testing.T) {
+	content := "<tool_call>{\"name\":\"bash\",\"arguments\":{\"command\":\"uname -a\"}}</tool_call>"
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	calls, cleaned := recoverToolCallsFromContent(content, defs)
+	if len(calls) != 1 {
+		t.Fatalf("recovered calls=%d, want 1", len(calls))
+	}
+	if calls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool name: %+v", calls[0])
+	}
+	if calls[0].Function.Arguments != `{"command":"uname -a"}` {
+		t.Fatalf("unexpected args: %s", calls[0].Function.Arguments)
+	}
+	if cleaned != "" {
+		t.Fatalf("expected empty cleaned content, got %q", cleaned)
+	}
+}
+
+func TestChatWithRetryRecoversTaggedToolCalls(t *testing.T) {
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{
+				Content: "<tool_call><function=bash><parameter=command>uname</parameter></function></tool_call>",
+			},
+		},
+	}
+	orch := New(prov, tools.NewRegistry(), Options{})
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	resp, err := orch.chatWithRetry(context.Background(), nil, defs, nil, nil)
+	if err != nil {
+		t.Fatalf("chatWithRetry failed: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected recovered tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool call: %+v", resp.ToolCalls[0])
 	}
 }
 

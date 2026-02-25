@@ -44,7 +44,6 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 		shouldRequireTodoInPlan(userInput) {
 		requireTodoForTurn = true
 	}
-	planSetupTask := planMode && isEnvironmentSetupTask(userInput)
 	infoGatheredForTodo := false
 	todoInitializedThisTurn := false
 
@@ -199,15 +198,6 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				o.appendToolDenied(call, reason)
 				continue
 			}
-			if planSetupTask && call.Function.Name == "bash" {
-				reason := "plan mode setup flow: do not run bash automatically; gather requirements via conversation first"
-				if out != nil {
-					renderToolBlocked(out, reason)
-				}
-				o.appendToolDenied(call, reason)
-				continue
-			}
-
 			args := json.RawMessage(call.Function.Arguments)
 			decision := permission.Result{Decision: permission.DecisionAllow}
 			if o.policy != nil {
@@ -404,7 +394,7 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 				"- You may read/analyze code, use fetch for web access, manage todos, and run read-only diagnostic bash commands (for example: uname, pwd, id) when needed.\n" +
 				"- For actionable requests, todos are the primary output. Collect enough information first, then create/update todos, then explain the plan.\n" +
 				"- For environment/setup requests (install/uninstall/configure software), do NOT execute shell commands directly. Ask clarifying questions first and provide a concrete plan.\n" +
-				"- In setup requests, do NOT call bash automatically in this turn. If command execution is needed, ask the user to run `! <cmd>` explicitly.\n" +
+				"- In setup requests, use minimal diagnostics only when necessary; every command must pass policy/approval checks.\n" +
 				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
 				"- If user asks for implementation, provide an actionable plan and required changes.",
 		}

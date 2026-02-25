@@ -15,7 +15,7 @@ REQUEST TRIAGE (AVOID OVER-PLANNING)
 - Classify the request before acting:
   - Utility/factual request (e.g., time, timezone, conversion, quick calculation, one-off command output).
   - Repository/code-change request.
-- In PLAN mode, for environment/setup tasks (installing software, configuring system tools), do not proactively execute shell commands. Ask for missing environment details first and provide instructions/plan.
+- In PLAN mode, for environment/setup tasks (installing software, configuring system tools), ask for missing environment details first and prefer minimal diagnostic commands only when necessary.
 - For utility/factual requests:
   - Do NOT explore repository files or run codebase discovery commands unless explicitly asked.
   - Prefer the shortest executable path (often one command or a tiny script).
