@@ -30,26 +30,29 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 	turnEditedCode := false
 	editedPaths := make([]string, 0, 4)
 	verifyAttempts := 0
+	planMode := o.CurrentMode() == "plan"
 	todoToolsReady := o.registry.Has("todoread") &&
 		o.registry.Has("todowrite") &&
 		o.isToolAllowed("todoread") &&
 		o.isToolAllowed("todowrite")
-	requireTodoFirst := o.workflow.RequireTodoForComplex &&
+	requireTodoForTurn := o.workflow.RequireTodoForComplex &&
 		todoToolsReady &&
 		isComplexTask(userInput)
-	if !requireTodoFirst &&
-		o.CurrentMode() == "plan" &&
+	if !requireTodoForTurn &&
+		planMode &&
 		todoToolsReady &&
 		shouldRequireTodoInPlan(userInput) {
-		requireTodoFirst = true
+		requireTodoForTurn = true
 	}
-	planSetupTask := o.CurrentMode() == "plan" && isEnvironmentSetupTask(userInput)
+	planSetupTask := planMode && isEnvironmentSetupTask(userInput)
 	planSetupBashUsed := false
+	infoGatheredForTodo := false
+	todoInitializedThisTurn := false
 
-	if requireTodoFirst {
-		o.ensureSessionTodos(ctx, userInput, out)
-		if err := ctx.Err(); err != nil {
-			return "", err
+	// Plan mode rule: collect enough information first, then generate todos.
+	if requireTodoForTurn {
+		if hasTodos, err := o.hasSessionTodos(ctx); err == nil && hasTodos {
+			todoInitializedThisTurn = true
 		}
 	}
 
@@ -131,6 +134,14 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 		}
 
 		if len(resp.ToolCalls) == 0 {
+			if planMode && requireTodoForTurn && !todoInitializedThisTurn && infoGatheredForTodo {
+				o.ensureSessionTodos(ctx, userInput, out)
+				todoInitializedThisTurn = true
+				if err := ctx.Err(); err != nil {
+					return "", err
+				}
+				continue
+			}
 			if turnEditedCode && shouldAutoVerifyEditedPaths(editedPaths) && o.workflow.AutoVerifyAfterEdit && verifyAttempts < o.workflow.MaxVerifyAttempts && o.isToolAllowed("bash") && o.registry.Has("bash") {
 				command := o.pickVerifyCommand()
 				if command != "" {
@@ -175,6 +186,14 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			}
 			if !o.isToolAllowed(call.Function.Name) {
 				reason := fmt.Sprintf("tool %s disabled by active agent %s", call.Function.Name, o.activeAgent.Name)
+				if out != nil {
+					renderToolBlocked(out, reason)
+				}
+				o.appendToolDenied(call, reason)
+				continue
+			}
+			if planMode && requireTodoForTurn && !todoInitializedThisTurn && call.Function.Name == "todowrite" && !infoGatheredForTodo {
+				reason := "plan mode requires information gathering before todo planning"
 				if out != nil {
 					renderToolBlocked(out, reason)
 				}
@@ -280,6 +299,9 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			if o.onToolEvent != nil {
 				o.onToolEvent(call.Function.Name, resultSummary, true)
 			}
+			if isInfoGatheringTool(call.Function.Name) {
+				infoGatheredForTodo = true
+			}
 			if planSetupTask && call.Function.Name == "bash" {
 				planSetupBashUsed = true
 			}
@@ -289,12 +311,22 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				ToolCallID: call.ID,
 				Content:    result,
 			})
+			if call.Function.Name == "todowrite" {
+				todoInitializedThisTurn = true
+			}
 			if call.Function.Name == "todoread" || call.Function.Name == "todowrite" {
 				if o.onTodoUpdate != nil {
 					items := todoItemsFromResult(result)
 					if items != nil {
 						o.onTodoUpdate(items)
 					}
+				}
+			}
+			if planMode && requireTodoForTurn && !todoInitializedThisTurn && infoGatheredForTodo {
+				o.ensureSessionTodos(ctx, userInput, out)
+				todoInitializedThisTurn = true
+				if err := ctx.Err(); err != nil {
+					return "", err
 				}
 			}
 			if call.Function.Name == "write" || call.Function.Name == "edit" || call.Function.Name == "patch" {
@@ -374,7 +406,7 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 			Content: "[RUNTIME_MODE]\n" +
 				"Current mode is PLAN.\n" +
 				"- You may read/analyze code, use fetch for web access, manage todos, and run read-only diagnostic bash commands (for example: uname, pwd, id) when needed.\n" +
-				"- For actionable requests, todos are the primary output. Create or update todos first, then explain the plan.\n" +
+				"- For actionable requests, todos are the primary output. Collect enough information first, then create/update todos, then explain the plan.\n" +
 				"- For environment/setup requests (install/uninstall/configure software), do NOT execute shell commands directly. Ask clarifying questions first and provide a concrete plan.\n" +
 				"- In setup requests, run at most one optional diagnostic bash command, then continue with todo planning (no follow-up version/install checks in the same turn).\n" +
 				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
@@ -460,6 +492,20 @@ func defaultTodoItems(userInput string) []map[string]any {
 	objective := short(strings.TrimSpace(userInput), 80)
 	if objective == "" {
 		objective = "Handle request"
+	}
+	if isEnvironmentSetupTask(userInput) {
+		if containsHan(userInput) {
+			return []map[string]any{
+				{"content": "收集环境信息并确认安装目标/约束", "status": "in_progress", "priority": "high"},
+				{"content": "制定安装或修复方案: " + objective, "status": "pending", "priority": "high"},
+				{"content": "整理验证步骤与后续建议", "status": "pending", "priority": "medium"},
+			}
+		}
+		return []map[string]any{
+			{"content": "Collect environment details and constraints", "status": "in_progress", "priority": "high"},
+			{"content": "Draft install/remediation plan: " + objective, "status": "pending", "priority": "high"},
+			{"content": "Provide verification steps and next actions", "status": "pending", "priority": "medium"},
+		}
 	}
 	// If the user already provided explicit steps (e.g. "1. ... 2. ..."),
 	// generate step-based todos instead of a generic "clarify" item.

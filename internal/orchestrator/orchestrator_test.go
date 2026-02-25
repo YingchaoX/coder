@@ -395,6 +395,14 @@ func TestDefaultTodoItems(t *testing.T) {
 	if content, _ := en[0]["content"].(string); !strings.Contains(content, "Clarify scope") {
 		t.Fatalf("unexpected en first todo: %v", en[0]["content"])
 	}
+
+	setup := defaultTodoItems("安装 python")
+	if len(setup) != 3 {
+		t.Fatalf("unexpected setup todo count: %d", len(setup))
+	}
+	if content, _ := setup[0]["content"].(string); !strings.Contains(content, "环境信息") {
+		t.Fatalf("unexpected setup first todo: %v", setup[0]["content"])
+	}
 }
 
 func TestEnsureSessionTodosAppendsValidToolSequence(t *testing.T) {
@@ -669,6 +677,27 @@ func TestIsEnvironmentSetupTask(t *testing.T) {
 	}
 }
 
+func TestIsInfoGatheringTool(t *testing.T) {
+	tests := []struct {
+		tool string
+		want bool
+	}{
+		{"bash", true},
+		{"read", true},
+		{"list", true},
+		{"fetch", true},
+		{"git_diff", true},
+		{"todowrite", false},
+		{"write", false},
+	}
+	for _, tc := range tests {
+		got := isInfoGatheringTool(tc.tool)
+		if got != tc.want {
+			t.Fatalf("isInfoGatheringTool(%q) = %v, want %v", tc.tool, got, tc.want)
+		}
+	}
+}
+
 func TestIsChattyGreeting(t *testing.T) {
 	tests := []struct {
 		input string
@@ -843,9 +872,13 @@ func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
 	foundTodoWrite := false
 	bashSuccess := 0
 	bashDenied := 0
+	toolOrder := make([]string, 0, 4)
 	for _, msg := range orch.messages {
 		if msg.Role == "tool" && msg.Name == "todowrite" {
 			foundTodoWrite = true
+		}
+		if msg.Role == "tool" {
+			toolOrder = append(toolOrder, msg.Name)
 		}
 		if msg.Role == "tool" && msg.Name == "bash" {
 			if strings.Contains(msg.Content, `"denied":true`) {
@@ -863,11 +896,82 @@ func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
 	if !foundTodoWrite {
 		t.Fatal("expected auto-initialized todo write in plan mode setup request")
 	}
+	if len(toolOrder) < 2 || toolOrder[0] != "bash" || toolOrder[1] != "todowrite" {
+		t.Fatalf("expected info gathering before todo init, tool order=%v", toolOrder)
+	}
 	if bashSuccess != 1 {
 		t.Fatalf("expected exactly one successful bash call, got %d", bashSuccess)
 	}
 	if bashDenied != 1 {
 		t.Fatalf("expected second bash call to be denied, got %d denied", bashDenied)
+	}
+}
+
+func TestRunTurnPlanBlocksTodoWriteBeforeInfoGathering(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "bash", result: `{"ok":true,"exit_code":0,"duration_ms":1,"stdout":"Darwin\n","stderr":""}`},
+		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
+		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"收集环境信息并确认安装目标/约束","status":"in_progress"}]}`},
+	)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{
+				ToolCalls: []chat.ToolCall{
+					{
+						ID:   "call_todo_first",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "todowrite",
+							Arguments: `{"todos":[{"content":"premature","status":"in_progress","priority":"high"}]}`,
+						},
+					},
+				},
+			},
+			{
+				ToolCalls: []chat.ToolCall{
+					{
+						ID:   "call_bash_uname",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "bash",
+							Arguments: `{"command":"uname"}`,
+						},
+					},
+				},
+			},
+			{Content: "已收集信息并生成todos。"},
+		},
+	}
+	orch := New(prov, registry, Options{MaxSteps: 5})
+	orch.SetMode("plan")
+
+	got, err := orch.RunTurn(context.Background(), "安装 python", nil)
+	if err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if !strings.Contains(got, "todos") {
+		t.Fatalf("unexpected final output: %q", got)
+	}
+
+	seenDeniedTodoWrite := false
+	seenAutoTodoWrite := false
+	for _, msg := range orch.messages {
+		if msg.Role != "tool" || msg.Name != "todowrite" {
+			continue
+		}
+		if strings.Contains(msg.Content, `"denied":true`) && strings.Contains(msg.Content, "information gathering") {
+			seenDeniedTodoWrite = true
+		}
+		if strings.Contains(msg.Content, `"ok":true`) && strings.Contains(msg.Content, "收集环境信息") {
+			seenAutoTodoWrite = true
+		}
+	}
+	if !seenDeniedTodoWrite {
+		t.Fatal("expected premature todowrite to be denied before info gathering")
+	}
+	if !seenAutoTodoWrite {
+		t.Fatal("expected auto todo initialization after info gathering")
 	}
 }
 

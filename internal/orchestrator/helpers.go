@@ -508,6 +508,18 @@ func isEnvironmentSetupTask(input string) bool {
 	})
 }
 
+func isInfoGatheringTool(toolName string) bool {
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	switch name {
+	case "read", "list", "glob", "grep", "bash", "fetch",
+		"lsp_diagnostics", "lsp_definition", "lsp_hover",
+		"git_status", "git_diff", "git_log", "pdf_parser":
+		return true
+	default:
+		return false
+	}
+}
+
 // isChattyGreeting 判断输入是否是闲聊/简单问候，不需要使用工具
 // 泛化性判断：短文本（<30字符）、仅包含问候/寒暄/简单问好的模式、没有具体任务指令
 func isChattyGreeting(input string) bool {
