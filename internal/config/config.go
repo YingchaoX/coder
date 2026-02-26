@@ -917,4 +917,3 @@ func stripJSONComments(data []byte) []byte {
 
 	return out.Bytes()
 }
-
