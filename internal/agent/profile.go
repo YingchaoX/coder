@@ -37,6 +37,7 @@ func Builtins() map[string]Profile {
 	plan.ToolEnabled["task"] = false
 	plan.ToolEnabled["git_add"] = false
 	plan.ToolEnabled["git_commit"] = false
+	plan.ToolEnabled["question"] = true
 
 	general := Profile{
 		Name:        "general",
@@ -158,5 +159,6 @@ func defaultToolSet(v bool) map[string]bool {
 		"git_commit":      v,
 		"fetch":           v,
 		"pdf_parser":      v,
+		"question":        false,
 	}
 }

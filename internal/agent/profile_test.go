@@ -26,6 +26,9 @@ func TestResolveBuiltins(t *testing.T) {
 	if p.ToolEnabled["git_commit"] {
 		t.Fatalf("plan should disable git_commit")
 	}
+	if !p.ToolEnabled["question"] {
+		t.Fatalf("plan should enable question")
+	}
 }
 
 func TestResolveBuildDisablesTodoWrite(t *testing.T) {
@@ -38,6 +41,9 @@ func TestResolveBuildDisablesTodoWrite(t *testing.T) {
 	}
 	if !p.ToolEnabled["todoread"] {
 		t.Fatalf("build should keep todoread enabled")
+	}
+	if p.ToolEnabled["question"] {
+		t.Fatalf("build should disable question")
 	}
 }
 

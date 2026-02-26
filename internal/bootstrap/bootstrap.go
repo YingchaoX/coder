@@ -158,6 +158,7 @@ func Build(cfg config.Config, workspaceRoot string) (*BuildResult, error) {
 			DefaultHeaders: cfg.Fetch.DefaultHeaders,
 		}),
 		tools.NewPDFParserTool(ws),
+		tools.NewQuestionTool(),
 	}
 	registry := tools.NewRegistry(toolList...)
 

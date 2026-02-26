@@ -19,6 +19,7 @@ import (
 )
 
 var errApprovalControllerClosed = errors.New("approval controller closed")
+var errQuestionControllerClosed = errors.New("question controller closed")
 
 type approvalPrompt struct {
 	ctx    context.Context
@@ -32,15 +33,27 @@ type approvalResponse struct {
 	err      error
 }
 
+type questionPrompt struct {
+	ctx    context.Context
+	req    tools.QuestionRequest
+	respCh chan questionResponse
+}
+
+type questionResponse struct {
+	resp *tools.QuestionResponse
+	err  error
+}
+
 type runtimeController struct {
 	stdinFd int
 	out     io.Writer
 	cancel  context.CancelFunc
 	oldTerm *term.State
 
-	stopCh    chan struct{}
-	doneCh    chan struct{}
-	promptReq chan approvalPrompt
+	stopCh      chan struct{}
+	doneCh      chan struct{}
+	promptReq   chan approvalPrompt
+	questionReq chan questionPrompt
 
 	cancelledByESC atomic.Bool
 	interrupted    atomic.Bool
@@ -58,13 +71,14 @@ func newRuntimeController(stdinFd int, stdin *os.File, out io.Writer, cancel con
 		return nil, fmt.Errorf("enable runtime raw mode: %w", err)
 	}
 	c := &runtimeController{
-		stdinFd:   stdinFd,
-		out:       out,
-		cancel:    cancel,
-		oldTerm:   oldState,
-		stopCh:    make(chan struct{}),
-		doneCh:    make(chan struct{}),
-		promptReq: make(chan approvalPrompt),
+		stdinFd:     stdinFd,
+		out:         out,
+		cancel:      cancel,
+		oldTerm:     oldState,
+		stopCh:      make(chan struct{}),
+		doneCh:      make(chan struct{}),
+		promptReq:   make(chan approvalPrompt),
+		questionReq: make(chan questionPrompt),
 	}
 	go c.loop()
 	return c, nil
@@ -128,40 +142,88 @@ func (c *runtimeController) PromptApproval(ctx context.Context, req tools.Approv
 	}
 }
 
+func (c *runtimeController) PromptQuestion(ctx context.Context, req tools.QuestionRequest) (*tools.QuestionResponse, error) {
+	if c == nil {
+		return nil, errQuestionControllerClosed
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	prompt := questionPrompt{
+		ctx:    ctx,
+		req:    req,
+		respCh: make(chan questionResponse, 1),
+	}
+	select {
+	case <-c.stopCh:
+		return nil, errQuestionControllerClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case c.questionReq <- prompt:
+	}
+	select {
+	case <-c.stopCh:
+		return nil, errQuestionControllerClosed
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp := <-prompt.respCh:
+		return resp.resp, resp.err
+	}
+}
+
+type pendingInteraction struct {
+	approval *approvalPrompt
+	question *questionPrompt
+	qIndex   int
+	qAnswers []string
+}
+
 func (c *runtimeController) loop() {
 	defer close(c.doneCh)
 
-	var pending *approvalPrompt
+	var pi pendingInteraction
 	var lineInput strings.Builder
 
 	for {
-		if pending != nil {
+		if pi.approval != nil {
 			select {
-			case <-pending.ctx.Done():
-				c.respondApproval(pending, bootstrap.ApprovalDecisionDeny, pending.ctx.Err())
-				pending = nil
+			case <-pi.approval.ctx.Done():
+				c.respondApproval(pi.approval, bootstrap.ApprovalDecisionDeny, pi.approval.ctx.Err())
+				pi = pendingInteraction{}
+				lineInput.Reset()
+				continue
+			default:
+			}
+		}
+		if pi.question != nil {
+			select {
+			case <-pi.question.ctx.Done():
+				c.respondQuestion(pi.question, nil, pi.question.ctx.Err())
+				pi = pendingInteraction{}
 				lineInput.Reset()
 				continue
 			default:
 			}
 		}
 
-		select {
-		case <-c.stopCh:
-			if pending != nil {
-				c.respondApproval(pending, bootstrap.ApprovalDecisionDeny, errApprovalControllerClosed)
-			}
-			return
-		case req := <-c.promptReq:
-			if pending != nil {
-				c.respondApproval(&req, bootstrap.ApprovalDecisionDeny, errors.New("another approval is in progress"))
+		if pi.approval == nil && pi.question == nil {
+			select {
+			case <-c.stopCh:
+				return
+			case req := <-c.promptReq:
+				pi.approval = &req
+				lineInput.Reset()
+				c.printApprovalPrompt(req.req, req.opts)
 				continue
+			case req := <-c.questionReq:
+				pi.question = &req
+				pi.qIndex = 0
+				pi.qAnswers = make([]string, len(req.req.Questions))
+				lineInput.Reset()
+				c.printQuestionPrompt(req.req, 0)
+				continue
+			default:
 			}
-			pending = &req
-			lineInput.Reset()
-			c.printApprovalPrompt(req.req, req.opts)
-			continue
-		default:
 		}
 
 		b, ok := c.readByteWithTimeout(80 * time.Millisecond)
@@ -169,14 +231,26 @@ func (c *runtimeController) loop() {
 			continue
 		}
 
-		if pending == nil {
+		if pi.approval == nil && pi.question == nil {
 			c.handleRuntimeKey(b)
 			continue
 		}
-		done := c.handleApprovalKey(pending, &lineInput, b)
-		if done {
-			pending = nil
-			lineInput.Reset()
+
+		if pi.approval != nil {
+			done := c.handleApprovalKey(pi.approval, &lineInput, b)
+			if done {
+				pi = pendingInteraction{}
+				lineInput.Reset()
+			}
+			continue
+		}
+
+		if pi.question != nil {
+			done := c.handleQuestionKey(&pi, &lineInput, b)
+			if done {
+				pi = pendingInteraction{}
+				lineInput.Reset()
+			}
 		}
 	}
 }
@@ -325,3 +399,98 @@ func (c *runtimeController) printApprovalPrompt(req tools.ApprovalRequest, opts 
 	}
 	_, _ = fmt.Fprint(c.out, "允许执行？(y/N, Esc=cancel): ")
 }
+
+func (c *runtimeController) respondQuestion(p *questionPrompt, resp *tools.QuestionResponse, err error) {
+	if p == nil {
+		return
+	}
+	select {
+	case p.respCh <- questionResponse{resp: resp, err: err}:
+	default:
+	}
+}
+
+func (c *runtimeController) printQuestionPrompt(req tools.QuestionRequest, index int) {
+	if c == nil || c.out == nil || index >= len(req.Questions) {
+		return
+	}
+	q := req.Questions[index]
+	total := len(req.Questions)
+
+	_, _ = fmt.Fprint(c.out, "\r\n")
+	if total > 1 {
+		_, _ = fmt.Fprintf(c.out, "[Question %d/%d] %s\r\n", index+1, total, q.Question)
+	} else {
+		_, _ = fmt.Fprintf(c.out, "[Question] %s\r\n", q.Question)
+	}
+	for i, opt := range q.Options {
+		label := opt.Label
+		if i == 0 {
+			label += " (Recommended)"
+		}
+		if strings.TrimSpace(opt.Description) != "" {
+			_, _ = fmt.Fprintf(c.out, "  %d. %s — %s\r\n", i+1, label, opt.Description)
+		} else {
+			_, _ = fmt.Fprintf(c.out, "  %d. %s\r\n", i+1, label)
+		}
+	}
+	_, _ = fmt.Fprint(c.out, "\r\n> ")
+}
+
+func (c *runtimeController) handleQuestionKey(pi *pendingInteraction, lineInput *strings.Builder, b byte) bool {
+	switch b {
+	case 0x03: // Ctrl+C
+		c.interrupted.Store(true)
+		if c.cancel != nil {
+			c.cancel()
+		}
+		c.respondQuestion(pi.question, nil, context.Canceled)
+		return true
+	case 0x1b: // Esc -> cancel all questions
+		_, _ = fmt.Fprint(c.out, "\r\n")
+		c.respondQuestion(pi.question, &tools.QuestionResponse{Cancelled: true}, nil)
+		return true
+	case '\r', '\n':
+		input := strings.TrimSpace(lineInput.String())
+		_, _ = fmt.Fprint(c.out, "\r\n")
+
+		if input == "" {
+			_, _ = fmt.Fprint(c.out, "> ")
+			lineInput.Reset()
+			return false
+		}
+
+		q := pi.question.req.Questions[pi.qIndex]
+		answer := tools.ResolveQuestionAnswer(input, q.Options)
+		pi.qAnswers[pi.qIndex] = answer
+		pi.qIndex++
+		lineInput.Reset()
+
+		if pi.qIndex >= len(pi.question.req.Questions) {
+			c.respondQuestion(pi.question, &tools.QuestionResponse{Answers: pi.qAnswers}, nil)
+			return true
+		}
+		c.printQuestionPrompt(pi.question.req, pi.qIndex)
+		return false
+	case 0x7f, 0x08: // Backspace
+		s := lineInput.String()
+		if s == "" {
+			return false
+		}
+		next, width := deleteLastRuneAndWidth(s)
+		lineInput.Reset()
+		lineInput.WriteString(next)
+		for i := 0; i < width; i++ {
+			_, _ = c.out.Write([]byte{'\b', ' ', '\b'})
+		}
+		return false
+	default:
+		if b < 0x20 || b > 0x7e {
+			return false
+		}
+		lineInput.WriteByte(b)
+		_, _ = c.out.Write([]byte{b})
+		return false
+	}
+}
+

@@ -13,6 +13,7 @@ import (
 
 	"coder/internal/bootstrap"
 	"coder/internal/orchestrator"
+	"coder/internal/tools"
 )
 
 // ANSI colors for prompt (per doc 09)
@@ -120,6 +121,7 @@ func Run(loop *Loop) error {
 				return err
 			}
 			runCtx = bootstrap.WithApprovalPrompter(runCtx, rtCtrl)
+			runCtx = tools.WithQuestionPrompter(runCtx, rtCtrl)
 		}
 
 		_, err = orch.RunInput(runCtx, text, runOut)
