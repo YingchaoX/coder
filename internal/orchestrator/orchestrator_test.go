@@ -46,9 +46,11 @@ type scriptedProvider struct {
 	model     string
 	responses []provider.ChatResponse
 	callCount int
+	requests  []provider.ChatRequest
 }
 
-func (p *scriptedProvider) Chat(_ context.Context, _ provider.ChatRequest, _ *provider.StreamCallbacks) (provider.ChatResponse, error) {
+func (p *scriptedProvider) Chat(_ context.Context, req provider.ChatRequest, _ *provider.StreamCallbacks) (provider.ChatResponse, error) {
+	p.requests = append(p.requests, req)
 	if p.callCount >= len(p.responses) {
 		return provider.ChatResponse{}, errors.New("no scripted response")
 	}
@@ -377,60 +379,6 @@ func TestCurrentContextStats(t *testing.T) {
 	}
 }
 
-func TestDefaultTodoItems(t *testing.T) {
-	zh := defaultTodoItems("优化 docs/USAGE.md")
-	if len(zh) != 3 {
-		t.Fatalf("unexpected zh todo count: %d", len(zh))
-	}
-	// 中文输入默认第一条为“确认目标/验收标准”，而不是泛化“澄清需求”。
-	// For Chinese inputs, the first todo should confirm objective/acceptance criteria.
-	if content, _ := zh[0]["content"].(string); !strings.Contains(content, "确认目标") && !strings.Contains(content, "验收") && !strings.Contains(content, "阅读代码") {
-		t.Fatalf("unexpected zh first todo: %v", zh[0]["content"])
-	}
-
-	en := defaultTodoItems("Refactor parser module")
-	if len(en) != 3 {
-		t.Fatalf("unexpected en todo count: %d", len(en))
-	}
-	if content, _ := en[0]["content"].(string); !strings.Contains(content, "Clarify scope") {
-		t.Fatalf("unexpected en first todo: %v", en[0]["content"])
-	}
-
-	setup := defaultTodoItems("安装 python")
-	if len(setup) != 3 {
-		t.Fatalf("unexpected setup todo count: %d", len(setup))
-	}
-	if content, _ := setup[0]["content"].(string); !strings.Contains(content, "环境信息") {
-		t.Fatalf("unexpected setup first todo: %v", setup[0]["content"])
-	}
-}
-
-func TestEnsureSessionTodosAppendsValidToolSequence(t *testing.T) {
-	registry := tools.NewRegistry(
-		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
-		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"a","status":"in_progress"}]}`},
-	)
-	orch := New(nil, registry, Options{})
-
-	orch.ensureSessionTodos(context.Background(), "优化文档", nil)
-
-	if len(orch.messages) != 2 {
-		t.Fatalf("unexpected message count: %d", len(orch.messages))
-	}
-	if orch.messages[0].Role != "assistant" || len(orch.messages[0].ToolCalls) != 1 {
-		t.Fatalf("unexpected assistant tool call message: %+v", orch.messages[0])
-	}
-	if orch.messages[0].ToolCalls[0].Function.Name != "todowrite" {
-		t.Fatalf("unexpected tool call name: %+v", orch.messages[0].ToolCalls[0])
-	}
-	if orch.messages[1].Role != "tool" || orch.messages[1].Name != "todowrite" {
-		t.Fatalf("unexpected tool message: %+v", orch.messages[1])
-	}
-	if orch.messages[1].ToolCallID != orch.messages[0].ToolCalls[0].ID {
-		t.Fatalf("tool_call_id mismatch: assistant=%q tool=%q", orch.messages[0].ToolCalls[0].ID, orch.messages[1].ToolCallID)
-	}
-}
-
 func TestRunAutoVerifyAppendsValidToolSequence(t *testing.T) {
 	registry := tools.NewRegistry(
 		mockTool{name: "bash", result: `{"ok":true,"exit_code":0,"duration_ms":1,"stdout":"","stderr":""}`},
@@ -638,66 +586,6 @@ func TestIsComplexTask(t *testing.T) {
 	}
 }
 
-func TestShouldRequireTodoInPlan(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"", false},
-		{"你好", false},
-		{"what time is it", false},
-		{"安装 python", true},
-		{"请给我一个迁移计划", true},
-		{"step by step refactor", true},
-	}
-	for _, tc := range tests {
-		got := shouldRequireTodoInPlan(tc.input)
-		if got != tc.want {
-			t.Fatalf("shouldRequireTodoInPlan(%q) = %v, want %v", tc.input, got, tc.want)
-		}
-	}
-}
-
-func TestIsEnvironmentSetupTask(t *testing.T) {
-	tests := []struct {
-		input string
-		want  bool
-	}{
-		{"安装 python", true},
-		{"configure python environment", true},
-		{"brew install python", true},
-		{"修复 parser bug", false},
-		{"read README", false},
-	}
-	for _, tc := range tests {
-		got := isEnvironmentSetupTask(tc.input)
-		if got != tc.want {
-			t.Fatalf("isEnvironmentSetupTask(%q) = %v, want %v", tc.input, got, tc.want)
-		}
-	}
-}
-
-func TestIsInfoGatheringTool(t *testing.T) {
-	tests := []struct {
-		tool string
-		want bool
-	}{
-		{"bash", true},
-		{"read", true},
-		{"list", true},
-		{"fetch", true},
-		{"git_diff", true},
-		{"todowrite", false},
-		{"write", false},
-	}
-	for _, tc := range tests {
-		got := isInfoGatheringTool(tc.tool)
-		if got != tc.want {
-			t.Fatalf("isInfoGatheringTool(%q) = %v, want %v", tc.tool, got, tc.want)
-		}
-	}
-}
-
 func TestIsChattyGreeting(t *testing.T) {
 	tests := []struct {
 		input string
@@ -826,92 +714,37 @@ func TestShortQuoteOrDashFirstLine(t *testing.T) {
 	}
 }
 
-func TestRunTurnPlanSetupPrefersTodosAndLimitsBash(t *testing.T) {
+func TestRunTurnPlanDoesNotAutoInitializeTodos(t *testing.T) {
 	registry := tools.NewRegistry(
-		mockTool{name: "bash", result: `{"ok":true,"exit_code":0,"duration_ms":1,"stdout":"Darwin\n","stderr":""}`},
 		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
-		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"确认环境与目标","status":"in_progress"}]}`},
+		mockTool{name: "todowrite", result: `{"ok":true,"count":1,"items":[{"content":"a","status":"in_progress"}]}`},
 	)
 	prov := &scriptedProvider{
 		model: "demo-model",
 		responses: []provider.ChatResponse{
-			{
-				ToolCalls: []chat.ToolCall{
-					{
-						ID:   "call_bash_uname",
-						Type: "function",
-						Function: chat.ToolCallFunction{
-							Name:      "bash",
-							Arguments: `{"command":"uname"}`,
-						},
-					},
-					{
-						ID:   "call_bash_python",
-						Type: "function",
-						Function: chat.ToolCallFunction{
-							Name:      "bash",
-							Arguments: `{"command":"python3 --version"}`,
-						},
-					},
-				},
-			},
-			{Content: "已生成计划并同步 todos。"},
+			{Content: "这里是执行计划。"},
 		},
 	}
-	orch := New(prov, registry, Options{MaxSteps: 4})
+	orch := New(prov, registry, Options{MaxSteps: 3})
 	orch.SetMode("plan")
 
 	got, err := orch.RunTurn(context.Background(), "安装 python", nil)
 	if err != nil {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
-	if !strings.Contains(got, "todos") {
+	if !strings.Contains(got, "计划") {
 		t.Fatalf("unexpected final output: %q", got)
 	}
-
-	foundTodoWrite := false
-	bashSuccess := 0
-	bashDenied := 0
-	toolOrder := make([]string, 0, 4)
 	for _, msg := range orch.messages {
 		if msg.Role == "tool" && msg.Name == "todowrite" {
-			foundTodoWrite = true
+			t.Fatalf("unexpected auto todowrite in plan mode: %+v", msg)
 		}
-		if msg.Role == "tool" {
-			toolOrder = append(toolOrder, msg.Name)
-		}
-		if msg.Role == "tool" && msg.Name == "bash" {
-			if strings.Contains(msg.Content, `"denied":true`) {
-				bashDenied++
-				if !strings.Contains(msg.Content, "do not run bash automatically") {
-					t.Fatalf("unexpected deny reason: %q", msg.Content)
-				}
-				continue
-			}
-			if strings.Contains(msg.Content, `"exit_code":0`) {
-				bashSuccess++
-			}
-		}
-	}
-	if !foundTodoWrite {
-		t.Fatal("expected todo initialization after information gathering")
-	}
-	if len(toolOrder) < 3 || toolOrder[0] != "bash" || toolOrder[1] != "todowrite" || toolOrder[2] != "bash" {
-		t.Fatalf("expected order [bash, todowrite, bash], got %v", toolOrder)
-	}
-	if bashSuccess != 2 {
-		t.Fatalf("expected successful bash calls in setup plan mode, got %d", bashSuccess)
-	}
-	if bashDenied != 0 {
-		t.Fatalf("expected no denied bash call, got %d denied", bashDenied)
 	}
 }
 
-func TestRunTurnPlanBlocksTodoWriteBeforeInfoGathering(t *testing.T) {
+func TestRunTurnPlanAllowsDirectTodoWriteWhenModelCallsIt(t *testing.T) {
 	registry := tools.NewRegistry(
-		mockTool{name: "fetch", result: `{"ok":true,"url":"https://example.com","status":200,"content":"ok"}`},
-		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
-		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"收集环境信息并确认安装目标/约束","status":"in_progress"}]}`},
+		mockTool{name: "todowrite", result: `{"ok":true,"count":1,"items":[{"content":"explicit todo","status":"in_progress"}]}`},
 	)
 	prov := &scriptedProvider{
 		model: "demo-model",
@@ -923,55 +756,83 @@ func TestRunTurnPlanBlocksTodoWriteBeforeInfoGathering(t *testing.T) {
 						Type: "function",
 						Function: chat.ToolCallFunction{
 							Name:      "todowrite",
-							Arguments: `{"todos":[{"content":"premature","status":"in_progress","priority":"high"}]}`,
+							Arguments: `{"todos":[{"content":"explicit todo","status":"in_progress","priority":"high"}]}`,
 						},
 					},
 				},
 			},
-			{
-				ToolCalls: []chat.ToolCall{
-					{
-						ID:   "call_fetch_probe",
-						Type: "function",
-						Function: chat.ToolCallFunction{
-							Name:      "fetch",
-							Arguments: `{"url":"https://example.com"}`,
-						},
-					},
-				},
-			},
-			{Content: "已收集信息并生成todos。"},
+			{Content: "todo 已更新。"},
 		},
 	}
-	orch := New(prov, registry, Options{MaxSteps: 5})
+	orch := New(prov, registry, Options{MaxSteps: 4})
 	orch.SetMode("plan")
 
-	got, err := orch.RunTurn(context.Background(), "安装 python", nil)
+	got, err := orch.RunTurn(context.Background(), "请先记一个todo", nil)
 	if err != nil {
 		t.Fatalf("RunTurn failed: %v", err)
 	}
-	if !strings.Contains(got, "todos") {
+	if !strings.Contains(got, "todo") {
 		t.Fatalf("unexpected final output: %q", got)
 	}
 
-	seenDeniedTodoWrite := false
-	seenAutoTodoWrite := false
+	seenToolResult := false
 	for _, msg := range orch.messages {
 		if msg.Role != "tool" || msg.Name != "todowrite" {
 			continue
 		}
-		if strings.Contains(msg.Content, `"denied":true`) && strings.Contains(msg.Content, "information gathering") {
-			seenDeniedTodoWrite = true
+		if strings.Contains(msg.Content, `"denied":true`) {
+			t.Fatalf("todowrite should not be blocked by orchestrator in plan mode: %q", msg.Content)
 		}
-		if strings.Contains(msg.Content, `"ok":true`) && strings.Contains(msg.Content, "收集环境信息") {
-			seenAutoTodoWrite = true
+		if strings.Contains(msg.Content, `"ok":true`) {
+			seenToolResult = true
 		}
 	}
-	if !seenDeniedTodoWrite {
-		t.Fatal("expected premature todowrite to be denied before info gathering")
+	if !seenToolResult {
+		t.Fatal("expected todowrite tool result")
 	}
-	if !seenAutoTodoWrite {
-		t.Fatal("expected auto todo initialization after info gathering")
+}
+
+func TestRunTurnFiltersPolicyDeniedToolsFromDefinitions(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "read", result: `{"ok":true}`},
+		mockTool{name: "write", result: `{"ok":true}`},
+		mockTool{name: "edit", result: `{"ok":true}`},
+		mockTool{name: "patch", result: `{"ok":true}`},
+		mockTool{name: "task", result: `{"ok":true}`},
+		mockTool{name: "bash", result: `{"ok":true}`},
+	)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{Content: "analysis only"},
+		},
+	}
+	orch := New(prov, registry, Options{MaxSteps: 2})
+	orch.policy = permission.New(config.PermissionConfig{
+		Default: "ask", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny", Task: "deny",
+		Bash: map[string]string{"*": "ask"},
+	})
+
+	if _, err := orch.RunTurn(context.Background(), "analyze code structure", nil); err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if len(prov.requests) == 0 {
+		t.Fatal("expected provider to receive at least one request")
+	}
+	seen := map[string]bool{}
+	for _, def := range prov.requests[0].Tools {
+		seen[def.Function.Name] = true
+	}
+	if !seen["read"] {
+		t.Fatalf("expected read tool definition, got %+v", seen)
+	}
+	if !seen["bash"] {
+		t.Fatalf("expected bash tool definition, got %+v", seen)
+	}
+	for _, denied := range []string{"write", "edit", "patch", "task"} {
+		if seen[denied] {
+			t.Fatalf("expected %s to be filtered out by policy deny", denied)
+		}
 	}
 }
 
@@ -1237,18 +1098,6 @@ func TestIsCoderConfigPath(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("isCoderConfigPath(%q) = %v, want %v", tc.path, got, tc.want)
 		}
-	}
-}
-
-func TestContainsAnyFold(t *testing.T) {
-	if !containsAnyFold("Hello World", []string{"world"}) {
-		t.Fatalf("expected true for case-insensitive match")
-	}
-	if containsAnyFold("abc", nil) {
-		t.Fatalf("expected false when needles empty")
-	}
-	if containsAnyFold("", []string{"x"}) {
-		t.Fatalf("expected false when source empty")
 	}
 }
 

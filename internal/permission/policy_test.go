@@ -135,6 +135,7 @@ func TestPresetConfigPlanReadToolsAllowed(t *testing.T) {
 		{tool: "pdf_parser", want: DecisionAllow},
 		{tool: "git_add", want: DecisionDeny},
 		{tool: "git_commit", want: DecisionDeny},
+		{tool: "unknown_tool", want: DecisionAsk},
 	}
 
 	for _, tc := range cases {

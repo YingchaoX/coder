@@ -255,7 +255,7 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 		}, true
 	case "plan":
 		return config.PermissionConfig{
-			Default: "deny", Read: "allow", Edit: "deny", Write: "deny", List: "allow", Glob: "allow", Grep: "allow", Patch: "deny",
+			Default: "ask", Read: "allow", Edit: "deny", Write: "deny", List: "allow", Glob: "allow", Grep: "allow", Patch: "deny",
 			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "deny", Fetch: "allow",
 			Bash: map[string]string{
