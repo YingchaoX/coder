@@ -254,6 +254,7 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 			Default: "ask", Read: "allow", Edit: "ask", Write: "ask", List: "allow", Glob: "allow", Grep: "allow", Patch: "ask",
 			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask", Fetch: "ask",
+			ExternalDir: "ask",
 			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow", "pnpm test*": "allow", "yarn test*": "allow"},
 		}, true
 	case "plan":
@@ -261,6 +262,7 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 			Default: "ask", Read: "allow", Edit: "deny", Write: "deny", List: "allow", Glob: "allow", Grep: "allow", Patch: "deny",
 			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "deny", Fetch: "allow", Question: "allow",
+			ExternalDir: "ask",
 			Bash: map[string]string{
 				"*":            "ask",
 				"ls":           "allow",
@@ -295,4 +297,9 @@ func (p *Policy) ApplyPreset(name string) bool {
 	}
 	p.cfg = cfg
 	return true
+}
+
+// ExternalDirDecision 返回外部目录访问权限决策
+func (p *Policy) ExternalDirDecision() Decision {
+	return normalizeDecision(p.cfg.ExternalDir, DecisionAsk)
 }

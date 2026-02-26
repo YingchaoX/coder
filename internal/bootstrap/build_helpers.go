@@ -70,7 +70,7 @@ func buildToolRegistry(
 	todoWriteTool := tools.NewTodoWriteTool(store, func() string { return *sessionIDRef })
 
 	toolList := []tools.Tool{
-		tools.NewReadTool(ws),
+		tools.NewReadTool(ws, policy),
 		tools.NewWriteTool(ws),
 		tools.NewEditTool(ws),
 		tools.NewListTool(ws),

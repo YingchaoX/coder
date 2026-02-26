@@ -242,7 +242,7 @@ func Default() Config {
 				"pnpm test*": "allow",
 				"yarn test*": "allow",
 			},
-			ExternalDir: "deny",
+			ExternalDir: "ask",
 		},
 		Workflow: WorkflowConfig{
 			RequireTodoForComplex: true,
