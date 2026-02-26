@@ -73,6 +73,7 @@ type PermissionConfig struct {
 	LSPDefinition   string            `json:"lsp_definition"`
 	LSPHover        string            `json:"lsp_hover"`
 	Fetch           string            `json:"fetch"`
+	Question        string            `json:"question"`
 	ExternalDir     string            `json:"external_directory"`
 	// CommandAllowlist 记录"始终同意的命令"（按命令名归一化）。
 	// CommandAllowlist stores commands that have been marked as "always allow" (normalized by command name).
@@ -553,6 +554,9 @@ func mergePermission(base PermissionConfig, override PermissionConfig) Permissio
 	}
 	if strings.TrimSpace(override.Fetch) != "" {
 		base.Fetch = override.Fetch
+	}
+	if strings.TrimSpace(override.Question) != "" {
+		base.Question = override.Question
 	}
 	if strings.TrimSpace(override.ExternalDir) != "" {
 		base.ExternalDir = override.ExternalDir

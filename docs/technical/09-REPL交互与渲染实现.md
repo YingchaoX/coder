@@ -72,7 +72,31 @@
 - 审批等待期间按 `Esc`：触发全局取消（等价 Cancel 整条自动化流程），不是 `N`。
 - 非交互模式（`auto_approve_ask=true` 或 `approval.interactive=false`）：不阻塞，自动放行策略层 `ask`，但危险命令风险审批仍需显式 y/n 或按配置拒绝执行。
 
-## 9. 状态同步（Orchestrator 驱动）
+## 9. Question 交互（plan mode）
+- **触发场景**：plan mode 下模型通过 `question` tool call 发起提问。
+- **终端渲染**：逐个展示问题，格式如下：
+  ```
+  [Question 1/3] 你希望如何处理这个模块？
+    1. 重构整个模块 (Recommended)
+    2. 只修改核心函数
+    3. 保持不变，添加新模块
+
+  >
+  ```
+  - 多个问题时显示 `[Question M/N]`，单个问题时显示 `[Question]`。
+  - 第一个选项自动追加 `(Recommended)` 标记。
+  - 若选项有 description，以 ` — description` 追加在 label 后。
+- **用户输入**：
+  - 输入数字（如 `2`）→ 返回对应选项的 label 文本。
+  - 输入任意文本 → 原样返回作为自定义回复。
+  - 空输入（直接 Enter）→ 不提交，保持等待。
+  - Esc → 取消全部问题（已回答部分也丢弃），返回取消信号给模型。
+  - Ctrl+C → 进程级中断。
+  - Backspace → 编辑当前输入。
+- **实现**：`runtimeController` 实现 `tools.QuestionPrompter` 接口，通过 `questionReq` channel 与 `loop()` 主循环通信（与审批交互并行处理，不可同时存在两个交互）。
+- **context 注入**：REPL loop 中通过 `tools.WithQuestionPrompter(ctx, rtCtrl)` 注入。
+
+## 10. 状态同步（Orchestrator 驱动）
 Orchestrator 在步进/回合结束时通过回调或写出的方式，将需展示的内容输出到同一 stdout 流：
 - 文本 chunk
 - reasoning chunk

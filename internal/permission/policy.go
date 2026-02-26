@@ -128,6 +128,8 @@ func (p *Policy) toolRule(tool string) string {
 		return p.cfg.Task
 	case "fetch":
 		return p.cfg.Fetch
+	case "question":
+		return p.cfg.Question
 	case "lsp_diagnostics":
 		return p.cfg.LSPDiagnostics
 	case "lsp_definition":
@@ -228,6 +230,7 @@ func (p *Policy) Summary() string {
 		"skill: " + p.cfg.Skill,
 		"task: " + p.cfg.Task,
 		"fetch: " + p.cfg.Fetch,
+		"question: " + p.cfg.Question,
 		"lsp_diagnostics: " + p.cfg.LSPDiagnostics,
 		"lsp_definition: " + p.cfg.LSPDefinition,
 		"lsp_hover: " + p.cfg.LSPHover,
@@ -257,7 +260,7 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 		return config.PermissionConfig{
 			Default: "ask", Read: "allow", Edit: "deny", Write: "deny", List: "allow", Glob: "allow", Grep: "allow", Patch: "deny",
 			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
-			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "deny", Fetch: "allow",
+			TodoRead: "allow", TodoWrite: "allow", Skill: "allow", Task: "deny", Fetch: "allow", Question: "allow",
 			Bash: map[string]string{
 				"*":            "ask",
 				"ls":           "allow",

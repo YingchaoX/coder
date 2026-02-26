@@ -13,6 +13,7 @@ import (
 
 	"coder/internal/bootstrap"
 	"coder/internal/orchestrator"
+	"coder/internal/tools"
 )
 
 // ANSI colors for prompt (per doc 09)
@@ -21,6 +22,8 @@ const (
 	ansiDim    = "\x1b[90m"
 	ansiGreen  = "\x1b[32m"
 	ansiYellow = "\x1b[33m"
+	ansiCyan   = "\x1b[36m"
+	ansiBold   = "\x1b[1m"
 )
 
 // Loop holds REPL state: orchestrator, prompt info, and input history.
@@ -120,6 +123,7 @@ func Run(loop *Loop) error {
 				return err
 			}
 			runCtx = bootstrap.WithApprovalPrompter(runCtx, rtCtrl)
+			runCtx = tools.WithQuestionPrompter(runCtx, rtCtrl)
 		}
 
 		_, err = orch.RunInput(runCtx, text, runOut)

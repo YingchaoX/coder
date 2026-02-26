@@ -39,6 +39,7 @@
   - 目标：规划与分析。
   - 工具层阻断写改删：禁用 `edit/write/patch/task` 与变更型 git 工具。
   - 允许联网（`fetch`）与 todo 规划（`todoread/todowrite`）。
+  - 启用 `question` 工具：模型可向用户提问选择题以澄清意图。
   - `bash` 使用白名单直通 + 非白名单审批：
     - 白名单（如 `ls/cat/grep/git status|diff|log/uname/pwd/id`）直接执行。
     - 其他命令默认 `ask`，走审批后执行。

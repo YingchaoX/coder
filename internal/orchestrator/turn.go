@@ -342,7 +342,8 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 				"- Plans can be provided directly in natural-language responses; todos are optional planning aids.\n" +
 				"- For environment/setup requests (install/uninstall/configure software), ask clarifying questions first and use minimal diagnostics only when necessary.\n" +
 				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
-				"- If user asks for implementation, provide an actionable plan and required changes.",
+				"- If user asks for implementation, provide an actionable plan and required changes.\n" +
+				"- Use the `question` tool to ask clarifying questions when user intent is ambiguous or you need preferences before planning. Present the recommended option first.",
 		}
 	default:
 		return chat.Message{

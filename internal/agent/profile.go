@@ -24,6 +24,8 @@ func Builtins() map[string]Profile {
 	}
 	// Build mode can read todo state but cannot plan/update todos.
 	build.ToolEnabled["todowrite"] = false
+	// Build mode cannot ask clarifying questions (plan-only).
+	build.ToolEnabled["question"] = false
 
 	plan := Profile{
 		Name:        "plan",
@@ -37,6 +39,8 @@ func Builtins() map[string]Profile {
 	plan.ToolEnabled["task"] = false
 	plan.ToolEnabled["git_add"] = false
 	plan.ToolEnabled["git_commit"] = false
+	// Plan mode can ask clarifying questions when user intent is ambiguous.
+	plan.ToolEnabled["question"] = true
 
 	general := Profile{
 		Name:        "general",
@@ -158,5 +162,6 @@ func defaultToolSet(v bool) map[string]bool {
 		"git_commit":      v,
 		"fetch":           v,
 		"pdf_parser":      v,
+		"question":        false,
 	}
 }

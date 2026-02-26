@@ -1,8 +1,8 @@
 # 05. Agent 与任务编排
 
 ## 1. 内置 Agent
-- `build`（primary）：默认主代理，负责交付改动；禁用 `todowrite`（不能设置 todos）。
-- `plan`（primary）：规划代理，可联网与规划 todo；禁用写改删相关工具（`write/edit/patch`）与 `task`。
+- `build`（primary）：默认主代理，负责交付改动；禁用 `todowrite`（不能设置 todos）和 `question`（不能向用户提问）。
+- `plan`（primary）：规划代理，可联网与规划 todo，可向用户提问确认；禁用写改删相关工具（`write/edit/patch`）与 `task`。
 - `general`（subagent）：通用子代理。
 - `explore`（subagent）：只读探索，禁用 `edit/write/patch/bash/task/todowrite`。
 
