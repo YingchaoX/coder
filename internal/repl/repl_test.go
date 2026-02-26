@@ -125,8 +125,8 @@ func TestPrintPromptTo_Format(t *testing.T) {
 	if !strings.Contains(out, "model: gpt-4o") {
 		t.Errorf("prompt should contain model: %q", out)
 	}
-	if !strings.Contains(out, "[default]") {
-		t.Errorf("prompt should contain [default]: %q", out)
+	if !strings.Contains(out, "[build]") {
+		t.Errorf("prompt should contain [build]: %q", out)
 	}
 	if !strings.Contains(out, "/path/to/cwd>") {
 		t.Errorf("prompt should contain cwd: %q", out)

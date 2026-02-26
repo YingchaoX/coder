@@ -38,5 +38,11 @@ func (o *Orchestrator) chatWithRetry(
 	if err != nil {
 		return provider.ChatResponse{}, err
 	}
+	if len(resp.ToolCalls) == 0 {
+		if recovered, cleaned := recoverToolCallsFromContent(resp.Content, definitions); len(recovered) > 0 {
+			resp.ToolCalls = recovered
+			resp.Content = cleaned
+		}
+	}
 	return resp, nil
 }

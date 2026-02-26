@@ -42,11 +42,9 @@ func (o *Orchestrator) runSlashCommand(ctx context.Context, rawInput, command, a
 			"  /help",
 			"  /model <name>",
 			"  /permissions [preset]",
-			"  /mode <plan|default|auto-edit|yolo>",
+			"  /mode <build|plan>",
+			"  /build",
 			"  /plan",
-			"  /default",
-			"  /auto-edit",
-			"  /yolo",
 			"  /tools",
 			"  /skills",
 			"  /todos",
@@ -71,11 +69,15 @@ func (o *Orchestrator) runSlashCommand(ctx context.Context, rawInput, command, a
 	case "mode":
 		mode := strings.TrimSpace(strings.ToLower(args))
 		if mode == "" {
-			return "Current mode: " + o.CurrentMode() + ". Usage: /mode plan|default|auto-edit|yolo", nil
+			return "Current mode: " + o.CurrentMode() + ". Usage: /mode build|plan", nil
 		}
+		prev := o.CurrentMode()
 		o.SetMode(mode)
+		if o.CurrentMode() == prev && mode != prev {
+			return "Unknown mode: " + mode + ". Use: build, plan", nil
+		}
 		return "Mode set to " + o.CurrentMode(), nil
-	case "plan", "default", "auto-edit", "yolo":
+	case "build", "plan":
 		o.SetMode(command)
 		return "Mode set to " + command, nil
 	case "tools":
@@ -127,12 +129,20 @@ func (o *Orchestrator) runSlashCommand(ctx context.Context, rawInput, command, a
 	case "permissions":
 		preset := strings.TrimSpace(strings.ToLower(args))
 		if preset == "" {
-			return "Current permissions: " + o.policy.Summary() + ". Presets: strict, balanced, auto-edit, yolo. Usage: /permissions [preset]", nil
+			if o.policy == nil {
+				return "Permission policy unavailable. Usage: /permissions [build|plan]", nil
+			}
+			return "Current permissions: " + o.policy.Summary() + ". Presets: build, plan. Usage: /permissions [preset]", nil
 		}
-		if o.policy.ApplyPreset(preset) {
-			return "Permissions set to preset: " + preset, nil
+		if o.policy == nil {
+			return "Permission policy unavailable.", nil
 		}
-		return "Unknown preset: " + preset + ". Use: strict, balanced, auto-edit, yolo", nil
+		prev := o.CurrentMode()
+		o.SetMode(preset)
+		if o.CurrentMode() == prev && preset != prev {
+			return "Unknown preset: " + preset + ". Use: build, plan", nil
+		}
+		return "Permissions set to preset: " + o.CurrentMode(), nil
 	case "new":
 		if o.store == nil {
 			return "Store not available.", nil

@@ -101,7 +101,9 @@ flowchart TD
 - `storage.SessionMeta`、`storage.TodoItem`：会话与 todo 状态。
 
 ## 7. 当前实现约束与已知差异
-- `/mode` 目前主要是会话展示状态，不直接改变策略引擎决策。
+- `/mode` 仅保留 `build|plan`，并与同名 Agent + Permission preset 联动切换。
+- `build` 禁用 `todowrite`；todo 规划与写入仅在 `plan` 模式允许。
+- `plan` 为硬只读规划模式：禁用 `edit/write/patch/task`，`bash` 仅允许只读白名单命令。
 - `/undo` 为整工作区 git 回滚（`git restore . && git clean -fd`），不是“按回合精确撤销”。
 - 自动验证命令选择为“配置优先 + 项目类型启发式”，当前未启用固定白名单硬约束。
 

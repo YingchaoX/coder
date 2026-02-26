@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"coder/internal/chat"
+	"coder/internal/permission"
+	"coder/internal/tools"
 )
 
 func parseBangCommand(input string) (command string, ok bool) {
@@ -49,11 +51,79 @@ func (o *Orchestrator) runBangCommand(ctx context.Context, rawInput, command str
 	args := mustJSON(map[string]string{"command": command})
 	rawArgs := json.RawMessage(args)
 
+	decision := permission.Result{Decision: permission.DecisionAllow}
+	if o.policy != nil {
+		decision = o.policy.Decide("bash", rawArgs)
+	}
+	if decision.Decision == permission.DecisionDeny {
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "blocked by policy"
+		}
+		msg := "command mode denied: " + reason
+		o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+		_ = o.flushSessionToFile(ctx)
+		if out != nil {
+			renderToolBlocked(out, summarizeForLog(msg))
+		}
+		return msg, nil
+	}
+
+	approvalReq, approvalErr := o.registry.ApprovalRequest("bash", rawArgs)
+	if approvalErr != nil {
+		msg := "command mode denied: approval check failed: " + approvalErr.Error()
+		o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+		_ = o.flushSessionToFile(ctx)
+		if out != nil {
+			renderToolError(out, summarizeForLog(msg))
+		}
+		return msg, nil
+	}
+	if decision.Decision == permission.DecisionAsk || approvalReq != nil {
+		reasons := make([]string, 0, 2)
+		if decision.Decision == permission.DecisionAsk {
+			if r := strings.TrimSpace(decision.Reason); r != "" {
+				reasons = append(reasons, r)
+			}
+		}
+		if approvalReq != nil {
+			if r := strings.TrimSpace(approvalReq.Reason); r != "" {
+				reasons = append(reasons, r)
+			}
+		}
+		approvalReason := joinApprovalReasons(reasons)
+		if o.onApproval == nil {
+			msg := "command mode denied: approval callback unavailable"
+			o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+			_ = o.flushSessionToFile(ctx)
+			if out != nil {
+				renderToolBlocked(out, summarizeForLog(msg))
+			}
+			return msg, nil
+		}
+		allowed, err := o.onApproval(ctx, tools.ApprovalRequest{
+			Tool:    "bash",
+			Reason:  approvalReason,
+			RawArgs: string(rawArgs),
+		})
+		if err != nil {
+			return "", fmt.Errorf("command mode approval callback: %w", err)
+		}
+		if !allowed {
+			msg := "command mode denied: " + approvalReason
+			o.appendMessage(chat.Message{Role: "assistant", Content: msg})
+			_ = o.flushSessionToFile(ctx)
+			if out != nil {
+				renderToolBlocked(out, summarizeForLog(msg))
+			}
+			return msg, nil
+		}
+	}
+
 	if out != nil {
 		renderToolStart(out, formatToolStart("bash", args))
 	}
 
-	// 命令模式下跳过 Policy 与风险审批链，等价用户直接执行 shell。
 	result, err := o.registry.Execute(ctx, "bash", rawArgs)
 	if err != nil {
 		return "", fmt.Errorf("execute command mode: %w", err)

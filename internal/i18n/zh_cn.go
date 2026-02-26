@@ -24,10 +24,8 @@ var ZhCNMessages = map[string]string{
 	"status.expand_hint": "展开",
 
 	// 界面 - 模式 (REPL /mode 或 TUI Tab)
-	"mode.plan":      "plan",
-	"mode.default":   "default",
-	"mode.auto-edit": "auto-edit",
-	"mode.yolo":      "yolo",
+	"mode.build": "build",
+	"mode.plan":  "plan",
 
 	// 界面 (TUI 侧栏 5 模块)
 	"sidebar.tools":  "Tools",

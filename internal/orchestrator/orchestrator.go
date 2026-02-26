@@ -38,7 +38,7 @@ type Orchestrator struct {
 	workflow          config.WorkflowConfig
 	workspaceRoot     string
 	compStrategy      contextmgr.CompactionStrategy
-	mode              string        // plan | default | auto-edit | yolo (REPL /mode)
+	mode              string        // build | plan (REPL /mode)
 	skillNames        []string      // for /skills
 	store             storage.Store // for /new, /resume, /model
 	sessionIDRef      *string       // mutable current session ID
@@ -88,6 +88,11 @@ func New(providerClient provider.Provider, registry *tools.Registry, opts Option
 		sessionIDRef:      opts.SessionIDRef,
 		configBasePath:    strings.TrimSpace(opts.ConfigBasePath),
 	}
+	initialMode := strings.TrimSpace(strings.ToLower(activeAgent.Name))
+	if initialMode == "" {
+		initialMode = "build"
+	}
+	o.SetMode(initialMode)
 	o.Reset()
 	return o
 }
@@ -145,16 +150,20 @@ func (o *Orchestrator) ActiveAgent() agent.Profile {
 	return o.activeAgent
 }
 
-// SetMode 设置当前用户模式（plan/default/auto-edit/yolo），供 REPL/TUI 模式切换
-// SetMode sets the current user mode for permission/auto-verify behavior
+// SetMode 设置当前用户模式（build/plan），并联动 agent 与 permissions preset。
+// SetMode sets current user mode (build/plan) and syncs agent + permissions preset.
 func (o *Orchestrator) SetMode(mode string) {
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if mode == "" {
 		return
 	}
 	switch mode {
-	case "plan", "default", "auto-edit", "yolo":
+	case "build", "plan":
 		o.mode = mode
+		o.activeAgent = agent.Resolve(mode, o.agents)
+		if o.policy != nil {
+			_ = o.policy.ApplyPreset(mode)
+		}
 	}
 }
 
@@ -162,7 +171,7 @@ func (o *Orchestrator) SetMode(mode string) {
 // CurrentMode returns the current user mode
 func (o *Orchestrator) CurrentMode() string {
 	if o.mode == "" {
-		return "default"
+		return "build"
 	}
 	return o.mode
 }

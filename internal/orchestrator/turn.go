@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
 	"strings"
-	"time"
 
 	"coder/internal/chat"
 	"coder/internal/contextmgr"
@@ -30,19 +28,6 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 	turnEditedCode := false
 	editedPaths := make([]string, 0, 4)
 	verifyAttempts := 0
-	requireTodoFirst := o.workflow.RequireTodoForComplex &&
-		o.registry.Has("todoread") &&
-		o.registry.Has("todowrite") &&
-		o.isToolAllowed("todoread") &&
-		o.isToolAllowed("todowrite") &&
-		isComplexTask(userInput)
-
-	if requireTodoFirst {
-		o.ensureSessionTodos(ctx, userInput, out)
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-	}
 
 	for step := 0; step < o.resolveMaxSteps(); step++ {
 		if err := ctx.Err(); err != nil {
@@ -83,7 +68,7 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 		}
 
 		// 对于闲聊/简单问候，不提供工具定义，避免模型过度探索
-		toolDefs := o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled)
+		toolDefs := o.filterToolDefsByPolicy(o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled))
 		if isChattyGreeting(userInput) && step == 0 {
 			toolDefs = nil
 		}
@@ -172,7 +157,6 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 				o.appendToolDenied(call, reason)
 				continue
 			}
-
 			args := json.RawMessage(call.Function.Arguments)
 			decision := permission.Result{Decision: permission.DecisionAllow}
 			if o.policy != nil {
@@ -339,172 +323,59 @@ func (o *Orchestrator) buildProviderMessages() []chat.Message {
 	if o.assembler != nil {
 		out = append(out, o.assembler.StaticMessages()...)
 	}
+	if modeMsg := o.runtimeModeSystemMessage(); strings.TrimSpace(modeMsg.Content) != "" {
+		out = append(out, modeMsg)
+	}
 	out = append(out, o.messages...)
 	return out
 }
 
-func (o *Orchestrator) hasSessionTodos(ctx context.Context) (bool, error) {
-	result, err := o.registry.Execute(ctx, "todoread", json.RawMessage(`{}`))
-	if err != nil {
-		return false, err
+func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
+	switch o.CurrentMode() {
+	case "plan":
+		return chat.Message{
+			Role: "system",
+			Content: "[RUNTIME_MODE]\n" +
+				"Current mode is PLAN.\n" +
+				"- Prioritize read-only analysis and planning.\n" +
+				"- You may read/analyze code, use fetch for web access, manage todos when helpful, and run read-only diagnostic bash commands when needed.\n" +
+				"- Plans can be provided directly in natural-language responses; todos are optional planning aids.\n" +
+				"- For environment/setup requests (install/uninstall/configure software), ask clarifying questions first and use minimal diagnostics only when necessary.\n" +
+				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
+				"- If user asks for implementation, provide an actionable plan and required changes.",
+		}
+	default:
+		return chat.Message{
+			Role: "system",
+			Content: "[RUNTIME_MODE]\n" +
+				"Current mode is BUILD.\n" +
+				"- Focus on implementing and validating changes.\n" +
+				"- Do NOT create or update todos in this mode (todowrite is plan-only).",
+		}
 	}
-	payload := parseJSONObject(result)
-	if payload == nil {
-		return false, nil
+}
+
+func (o *Orchestrator) filterToolDefsByPolicy(defs []chat.ToolDef) []chat.ToolDef {
+	if o.policy == nil || len(defs) == 0 {
+		return defs
 	}
-	if getInt(payload, "count", 0) <= 0 {
-		return false, nil
-	}
-	items := getArray(payload, "items")
-	if len(items) == 0 {
-		return false, nil
-	}
-	hasNonCompleted := false
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
+	filtered := make([]chat.ToolDef, 0, len(defs))
+	for _, def := range defs {
+		name := strings.ToLower(strings.TrimSpace(def.Function.Name))
+		if name == "" {
 			continue
 		}
-		status := strings.ToLower(strings.TrimSpace(getString(item, "status", "")))
-		if status != "completed" {
-			hasNonCompleted = true
-			break
-		}
-	}
-	// 返回值语义：
-	// - true  表示“当前会话仍有未完成的 todo”，后续输入应倾向继续沿用这组 todo。
-	// - false 表示“todo 为空或全部 completed”，新复杂任务可以触发自动初始化新的 todo 列表。
-	return hasNonCompleted, nil
-}
-
-func (o *Orchestrator) ensureSessionTodos(ctx context.Context, userInput string, out io.Writer) {
-	hasTodos, err := o.hasSessionTodos(ctx)
-	if err != nil || hasTodos {
-		return
-	}
-	args := mustJSON(map[string]any{
-		"todos": defaultTodoItems(userInput),
-	})
-	if out != nil {
-		renderToolStart(out, "* Auto init todo list")
-	}
-	result, err := o.registry.Execute(ctx, "todowrite", json.RawMessage(args))
-	callID := fmt.Sprintf("auto_todo_init_%d", time.Now().UnixNano())
-	if err != nil {
-		if out != nil {
-			renderToolError(out, summarizeForLog(err.Error()))
-		}
-		return
-	}
-	if out != nil {
-		renderToolResult(out, summarizeToolResult("todowrite", result))
-	}
-	o.appendSyntheticToolExchange("todowrite", args, result, callID)
-	if o.onTodoUpdate != nil {
-		items := todoItemsFromResult(result)
-		if items != nil {
-			o.onTodoUpdate(items)
-		}
-	}
-}
-
-func defaultTodoItems(userInput string) []map[string]any {
-	objective := short(strings.TrimSpace(userInput), 80)
-	if objective == "" {
-		objective = "Handle request"
-	}
-	// If the user already provided explicit steps (e.g. "1. ... 2. ..."),
-	// generate step-based todos instead of a generic "clarify" item.
-	// 如果用户已经给出明确步骤（例如 "1. ... 2. ..."），则直接按步骤生成待办，避免泛化的“澄清需求”。
-	if steps := parseNumberedSteps(userInput); len(steps) >= 2 {
-		items := make([]map[string]any, 0, len(steps)+1)
-		for i, s := range steps {
-			priority := "high"
-			if i >= 2 {
-				priority = "medium"
-			}
-			status := "pending"
-			if i == 0 {
-				status = "in_progress"
-			}
-			items = append(items, map[string]any{
-				"content":  s,
-				"status":   status,
-				"priority": priority,
-			})
-		}
-		// Add a lightweight wrap-up step if user didn't mention it.
-		// 如果用户没提到“总结/验证”，补一条轻量收尾步骤。
-		if !containsAnyFold(userInput, []string{"验证", "测试", "总结", "review", "verify", "test", "summary"}) {
-			items = append(items, map[string]any{
-				"content":  "执行验证并总结变更",
-				"status":   "pending",
-				"priority": "low",
-			})
-		}
-		return items
-	}
-	if containsHan(userInput) {
-		return []map[string]any{
-			{"content": "阅读代码并确认目标/验收标准", "status": "in_progress", "priority": "high"},
-			{"content": "实施修改: " + objective, "status": "pending", "priority": "high"},
-			{"content": "执行验证并总结变更", "status": "pending", "priority": "medium"},
-		}
-	}
-	return []map[string]any{
-		{"content": "Clarify scope and acceptance criteria", "status": "in_progress", "priority": "high"},
-		{"content": "Implement changes: " + objective, "status": "pending", "priority": "high"},
-		{"content": "Run validation and summarize results", "status": "pending", "priority": "medium"},
-	}
-}
-
-func parseNumberedSteps(input string) []string {
-	s := strings.TrimSpace(input)
-	if s == "" {
-		return nil
-	}
-	// Match common numbered step prefixes: "1.", "1、", "1)", "(1)" (also works mid-string after punctuation/space/newline).
-	// 匹配常见编号前缀："1." "1、" "1)" "(1)"（也支持出现在句中、逗号后、换行后）。
-	re := regexp.MustCompile(`(?m)(?:^|[，,;；\n]\s*)\(?\s*\d{1,2}\s*[\.、\)]\s*`)
-	indices := re.FindAllStringIndex(s, -1)
-	if len(indices) < 2 {
-		return nil
-	}
-	steps := make([]string, 0, len(indices))
-	for i, idx := range indices {
-		start := idx[1]
-		end := len(s)
-		if i+1 < len(indices) {
-			end = indices[i+1][0]
-		}
-		part := strings.TrimSpace(s[start:end])
-		part = strings.Trim(part, "，,;；")
-		part = strings.TrimSpace(part)
-		if part == "" {
+		// bash permission depends on concrete command args; keep runtime checks.
+		if name == "bash" {
+			filtered = append(filtered, def)
 			continue
 		}
-		steps = append(steps, part)
-	}
-	if len(steps) < 2 {
-		return nil
-	}
-	return steps
-}
-
-func containsAnyFold(s string, needles []string) bool {
-	if strings.TrimSpace(s) == "" || len(needles) == 0 {
-		return false
-	}
-	lower := strings.ToLower(s)
-	for _, n := range needles {
-		if strings.TrimSpace(n) == "" {
+		if o.policy.Decide(name, nil).Decision == permission.DecisionDeny {
 			continue
 		}
-		if strings.Contains(lower, strings.ToLower(n)) {
-			return true
-		}
+		filtered = append(filtered, def)
 	}
-	return false
+	return filtered
 }
 
 func (o *Orchestrator) emitContextUpdate() {

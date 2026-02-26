@@ -30,28 +30,24 @@
 5. 执行工具。
 6. 结果写入 `tool` 消息并更新运行状态。
 
-例外：`yolo + bash`
-- 跳过策略拦截与风险审批，直接执行。
-
 ## 5. 模式行为矩阵
-- `plan`
-  - 目标：方案与拆解。
-  - 默认禁写入链路（`write/patch`）与副作用命令。
-  - 不触发自动验证。
-- `default`
-  - 目标：均衡执行。
-  - 写入与高风险操作按策略审批。
-  - 自动验证仅在用户明确要求时触发。
-- `auto-edit`
+- `build`
   - 目标：交付改动。
-  - 允许主动读写、自动验证、失败修复重试。
-- `yolo`
-  - 目标：高自治执行。
-  - `bash` 全放行（包含高风险命令）。
+  - 允许读写与自动验证。
+  - 禁用 `todowrite`（不能设置 todos）。
+- `plan`
+  - 目标：规划与分析。
+  - 工具层阻断写改删：禁用 `edit/write/patch/task` 与变更型 git 工具。
+  - 允许联网（`fetch`）与 todo 规划（`todoread/todowrite`）。
+  - `bash` 使用白名单直通 + 非白名单审批：
+    - 白名单（如 `ls/cat/grep/git status|diff|log/uname/pwd/id`）直接执行。
+    - 其他命令默认 `ask`，走审批后执行。
 
 ## 6. `!` 命令分支
 - 直接调用 `bash` 工具，不发模型请求。
-- 视为用户直接在终端执行 shell：**不经过策略层与风险审批链**，仅受工作区路径等基础安全约束（详见《04-安全与权限规则》中的“命令模式 `!`”小节）。
+- 经过与普通 `bash` 一致的策略与审批链：
+  - Policy 决策（`allow/ask/deny`）
+  - 工具层风险审批（如危险命令与重定向覆盖检查）
 - 返回结构化执行结果（命令、exit code、stdout/stderr）。
 
 ## 7. `/` 命令分支
@@ -59,7 +55,7 @@
 - `/help`
 - `/model <name>`
 - `/permissions [preset]`
-- `/mode <name>`（或 `/plan`、`/default`、`/auto-edit`、`/yolo` 等价形式）
+- `/mode <build|plan>`（或 `/build`、`/plan` 等价形式）
 - `/tools`
 - `/skills`
 - `/todos`
@@ -72,8 +68,8 @@
 子命令契约摘要：
 - `/help`：展示命令、Enter/Ctrl+D 输入规则、流式中断等说明。
 - `/model <name>`：立即切换当前会话模型，并尝试持久化到 `./.coder/config.json`。
-- `/permissions [preset]`：无参数时展示当前权限矩阵；有参数时切换权限预设（`strict`、`balanced`、`auto-edit`、`yolo`）。
-- `/mode <name>`：切换当前模式并更新提示符（或使用 `/plan`、`/default`、`/auto-edit`、`/yolo`）。
+- `/permissions [preset]`：无参数时展示当前权限矩阵；有参数时切换权限预设（`build`、`plan`），并联动当前模式。
+- `/mode <build|plan>`：切换当前模式并联动切换同名 Agent 与权限预设（或使用 `/build`、`/plan`）。
 - `/tools`：展示当前可用工具列表/摘要。
 - `/skills`：展示当前可用技能列表/摘要。
 - `/todos`：仅查看当前会话 todo 列表（只读）。
@@ -97,7 +93,7 @@
 - `workflow.auto_verify_after_edit=true`。
 - `bash` 工具可用。
 - 尝试次数未超过 `max_verify_attempts`。
-- 当前模式为 `auto-edit` 或 `yolo`，或 `default` 下用户明确要求。
+- 当前模式为 `build`，且用户明确要求或流程判定需要自动验证。
 
 执行规则：
 - 仅允许白名单命令：

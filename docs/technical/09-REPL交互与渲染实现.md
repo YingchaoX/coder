@@ -7,10 +7,11 @@
 
 示例：
 - 第一行：`context: 1200 tokens · model: gpt-4o`
-- 第二行：`[default] /Users/dev/myapp> `（或后接用户已输入内容）
+- 第二行：`[build] /Users/dev/myapp> `（或后接用户已输入内容）
 
 ## 2. 输入规则
 - **发送**：Enter 即发送当前输入。单行时直接 Enter 发送；多行仅支持粘贴：粘贴后终端显示 `[copy N lines]`，再按 Enter 发送该多行内容。TTY 下为 raw 模式；非 TTY（管道）下按行或 EOF 读取。
+- **Tab 模式切换**：仅当输入框为空时，Tab 在 `build` 与 `plan` 之间切换；当输入框非空时，Tab 保持输入编辑行为。
 - **输入历史（↑/↓）**：与典型 Linux 终端行为接近。在输入态下，↑ 可调出上一条用户输入，连续按 ↑ 逐条回溯直至最早记录并停留；↓ 则在历史中向前移动，越过最新记录后返回到“空输入行”（不保留中途编辑内容）。历史仅包含当前 REPL 进程内已成功提交的输入行。
 - **输入分支**：
   - `!` 前缀：命令模式，直走 `bash`。
@@ -18,7 +19,7 @@
   - 普通文本：进入模型-工具循环。
 
 ## 3. 模式切换
-- 通过内建命令切换：`/mode <name>` 或 `/plan`、`/default`、`/auto-edit`、`/yolo`。
+- 通过内建命令切换：`/mode <build|plan>` 或 `/build`、`/plan`。
 - 切换后提示符立即体现当前模式（第二行 `[mode]` 更新）。
 
 ## 4. 流式输出
@@ -65,7 +66,7 @@
 - **Tools、Skills**：通过 `/tools`、`/skills` 按需查看，非固定侧栏。
 
 ## 8. 审批交互
-- 触发场景：仅当**模型触发工具调用**且策略层或工具层判定为 `ask` 时（例如模型调用 `bash` 执行命令），命令模式 `!` 不走此交互链。
+- 触发场景：当工具调用（包含命令模式 `!`）在策略层或工具层判定为 `ask` 时触发审批交互。
 - 策略层 `ask`（如 `bash policy requires approval`）：在 stdout 打印待执行命令与说明，从 REPL 读审批输入（y/n/always）后继续；`always` 表示将该命令记录到项目级 allowlist，后续相同命令在策略层自动放行。
 - 工具层危险命令风险审批（如 `matches dangerous command policy`）：在 stdout 打印命令与说明，仅接受 y/n（不提供 `always`）。
 - 审批等待期间按 `Esc`：触发全局取消（等价 Cancel 整条自动化流程），不是 `N`。
@@ -124,7 +125,7 @@ sequenceDiagram
   - `RunInput` 内部通过 `parseBangCommand` 判断是否为命令模式；命中后调用 `runBangCommand`，否则走 `/` 内建命令或 `RunTurn`（模型-工具循环）。
   - `runBangCommand` 首先追加一条 `user` 消息，内容为原始输入（例如 `"! ls"`），确保命令本身在后续模型上下文中可见。
 - **命令执行与风险模型**：
-  - 命令模式通过 `registry.Execute("bash", args)` 直接调用 `bash` 工具；**显式跳过策略层 Policy 与工具层风险审批链**，语义等价“用户自己在 shell 中执行该命令”。
+  - 命令模式通过 `bash` 工具执行命令，并复用 Agent/Policy/审批链（与普通 tool call 一致）。
   - 仍受工具层安全配置约束：`command_timeout_ms` 与 `output_limit_bytes`；`bash` 在 JSON 结果中返回 `exit_code`、`stdout`、`stderr`、`truncated`、`duration_ms` 等字段。
   - 是否允许调用 `bash` 仅由 `activeAgent.ToolEnabled["bash"]` 控制；禁止时返回 `command mode denied: bash disabled by active agent <name>` 的 `assistant` 文本。
 - **渲染与 `[COMMAND]` 区块**：

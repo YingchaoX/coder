@@ -15,6 +15,7 @@ import (
 	"coder/internal/chat"
 	"coder/internal/config"
 	"coder/internal/contextmgr"
+	"coder/internal/permission"
 	"coder/internal/provider"
 	"coder/internal/storage"
 	"coder/internal/tools"
@@ -45,9 +46,11 @@ type scriptedProvider struct {
 	model     string
 	responses []provider.ChatResponse
 	callCount int
+	requests  []provider.ChatRequest
 }
 
-func (p *scriptedProvider) Chat(_ context.Context, _ provider.ChatRequest, _ *provider.StreamCallbacks) (provider.ChatResponse, error) {
+func (p *scriptedProvider) Chat(_ context.Context, req provider.ChatRequest, _ *provider.StreamCallbacks) (provider.ChatResponse, error) {
+	p.requests = append(p.requests, req)
 	if p.callCount >= len(p.responses) {
 		return provider.ChatResponse{}, errors.New("no scripted response")
 	}
@@ -320,6 +323,42 @@ func TestRunInputBangDeniedPersistsResult(t *testing.T) {
 	}
 }
 
+func TestRunInputBangRespectsPolicyPreset(t *testing.T) {
+	registry := tools.NewRegistry(tools.NewBashTool(t.TempDir(), 2000, 1<<20))
+	pol := permission.New(config.PermissionConfig{Default: "ask", Bash: map[string]string{"*": "ask"}})
+	approvalCalls := 0
+	orch := New(nil, registry, Options{
+		Policy: pol,
+		OnApproval: func(_ context.Context, req tools.ApprovalRequest) (bool, error) {
+			approvalCalls++
+			if req.Tool != "bash" {
+				t.Fatalf("unexpected approval tool: %s", req.Tool)
+			}
+			return true, nil
+		},
+	})
+	orch.SetMode("plan")
+
+	got, err := orch.RunInput(context.Background(), "! echo hi", nil)
+	if err != nil {
+		t.Fatalf("RunInput failed: %v", err)
+	}
+	if strings.Contains(strings.ToLower(got), "command mode denied") {
+		t.Fatalf("echo should be approval-based (not hard denied), got: %q", got)
+	}
+	if approvalCalls == 0 {
+		t.Fatal("expected approval callback for ask command")
+	}
+
+	got, err = orch.RunInput(context.Background(), "! ls", nil)
+	if err != nil {
+		t.Fatalf("RunInput failed: %v", err)
+	}
+	if strings.Contains(strings.ToLower(got), "command mode denied") {
+		t.Fatalf("ls should be allowed in plan whitelist, got: %q", got)
+	}
+}
+
 func TestCurrentContextStats(t *testing.T) {
 	orch := New(nil, tools.NewRegistry(), Options{
 		ContextTokenLimit: 1000,
@@ -335,54 +374,8 @@ func TestCurrentContextStats(t *testing.T) {
 	if stats.EstimatedTokens <= 0 {
 		t.Fatalf("estimated=%d", stats.EstimatedTokens)
 	}
-	if stats.MessageCount != 2 {
+	if stats.MessageCount != 3 {
 		t.Fatalf("message count=%d", stats.MessageCount)
-	}
-}
-
-func TestDefaultTodoItems(t *testing.T) {
-	zh := defaultTodoItems("优化 docs/USAGE.md")
-	if len(zh) != 3 {
-		t.Fatalf("unexpected zh todo count: %d", len(zh))
-	}
-	// 中文输入默认第一条为“确认目标/验收标准”，而不是泛化“澄清需求”。
-	// For Chinese inputs, the first todo should confirm objective/acceptance criteria.
-	if content, _ := zh[0]["content"].(string); !strings.Contains(content, "确认目标") && !strings.Contains(content, "验收") && !strings.Contains(content, "阅读代码") {
-		t.Fatalf("unexpected zh first todo: %v", zh[0]["content"])
-	}
-
-	en := defaultTodoItems("Refactor parser module")
-	if len(en) != 3 {
-		t.Fatalf("unexpected en todo count: %d", len(en))
-	}
-	if content, _ := en[0]["content"].(string); !strings.Contains(content, "Clarify scope") {
-		t.Fatalf("unexpected en first todo: %v", en[0]["content"])
-	}
-}
-
-func TestEnsureSessionTodosAppendsValidToolSequence(t *testing.T) {
-	registry := tools.NewRegistry(
-		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
-		mockTool{name: "todowrite", result: `{"ok":true,"count":3,"items":[{"content":"a","status":"in_progress"}]}`},
-	)
-	orch := New(nil, registry, Options{})
-
-	orch.ensureSessionTodos(context.Background(), "优化文档", nil)
-
-	if len(orch.messages) != 2 {
-		t.Fatalf("unexpected message count: %d", len(orch.messages))
-	}
-	if orch.messages[0].Role != "assistant" || len(orch.messages[0].ToolCalls) != 1 {
-		t.Fatalf("unexpected assistant tool call message: %+v", orch.messages[0])
-	}
-	if orch.messages[0].ToolCalls[0].Function.Name != "todowrite" {
-		t.Fatalf("unexpected tool call name: %+v", orch.messages[0].ToolCalls[0])
-	}
-	if orch.messages[1].Role != "tool" || orch.messages[1].Name != "todowrite" {
-		t.Fatalf("unexpected tool message: %+v", orch.messages[1])
-	}
-	if orch.messages[1].ToolCallID != orch.messages[0].ToolCalls[0].ID {
-		t.Fatalf("tool_call_id mismatch: assistant=%q tool=%q", orch.messages[0].ToolCalls[0].ID, orch.messages[1].ToolCallID)
 	}
 }
 
@@ -721,6 +714,193 @@ func TestShortQuoteOrDashFirstLine(t *testing.T) {
 	}
 }
 
+func TestRunTurnPlanDoesNotAutoInitializeTodos(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "todoread", result: `{"ok":true,"count":0,"items":[]}`},
+		mockTool{name: "todowrite", result: `{"ok":true,"count":1,"items":[{"content":"a","status":"in_progress"}]}`},
+	)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{Content: "这里是执行计划。"},
+		},
+	}
+	orch := New(prov, registry, Options{MaxSteps: 3})
+	orch.SetMode("plan")
+
+	got, err := orch.RunTurn(context.Background(), "安装 python", nil)
+	if err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if !strings.Contains(got, "计划") {
+		t.Fatalf("unexpected final output: %q", got)
+	}
+	for _, msg := range orch.messages {
+		if msg.Role == "tool" && msg.Name == "todowrite" {
+			t.Fatalf("unexpected auto todowrite in plan mode: %+v", msg)
+		}
+	}
+}
+
+func TestRunTurnPlanAllowsDirectTodoWriteWhenModelCallsIt(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "todowrite", result: `{"ok":true,"count":1,"items":[{"content":"explicit todo","status":"in_progress"}]}`},
+	)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{
+				ToolCalls: []chat.ToolCall{
+					{
+						ID:   "call_todo_first",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "todowrite",
+							Arguments: `{"todos":[{"content":"explicit todo","status":"in_progress","priority":"high"}]}`,
+						},
+					},
+				},
+			},
+			{Content: "todo 已更新。"},
+		},
+	}
+	orch := New(prov, registry, Options{MaxSteps: 4})
+	orch.SetMode("plan")
+
+	got, err := orch.RunTurn(context.Background(), "请先记一个todo", nil)
+	if err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if !strings.Contains(got, "todo") {
+		t.Fatalf("unexpected final output: %q", got)
+	}
+
+	seenToolResult := false
+	for _, msg := range orch.messages {
+		if msg.Role != "tool" || msg.Name != "todowrite" {
+			continue
+		}
+		if strings.Contains(msg.Content, `"denied":true`) {
+			t.Fatalf("todowrite should not be blocked by orchestrator in plan mode: %q", msg.Content)
+		}
+		if strings.Contains(msg.Content, `"ok":true`) {
+			seenToolResult = true
+		}
+	}
+	if !seenToolResult {
+		t.Fatal("expected todowrite tool result")
+	}
+}
+
+func TestRunTurnFiltersPolicyDeniedToolsFromDefinitions(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "read", result: `{"ok":true}`},
+		mockTool{name: "write", result: `{"ok":true}`},
+		mockTool{name: "edit", result: `{"ok":true}`},
+		mockTool{name: "patch", result: `{"ok":true}`},
+		mockTool{name: "task", result: `{"ok":true}`},
+		mockTool{name: "bash", result: `{"ok":true}`},
+	)
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{Content: "analysis only"},
+		},
+	}
+	orch := New(prov, registry, Options{MaxSteps: 2})
+	orch.policy = permission.New(config.PermissionConfig{
+		Default: "ask", Read: "allow", Edit: "deny", Write: "deny", Patch: "deny", Task: "deny",
+		Bash: map[string]string{"*": "ask"},
+	})
+
+	if _, err := orch.RunTurn(context.Background(), "analyze code structure", nil); err != nil {
+		t.Fatalf("RunTurn failed: %v", err)
+	}
+	if len(prov.requests) == 0 {
+		t.Fatal("expected provider to receive at least one request")
+	}
+	seen := map[string]bool{}
+	for _, def := range prov.requests[0].Tools {
+		seen[def.Function.Name] = true
+	}
+	if !seen["read"] {
+		t.Fatalf("expected read tool definition, got %+v", seen)
+	}
+	if !seen["bash"] {
+		t.Fatalf("expected bash tool definition, got %+v", seen)
+	}
+	for _, denied := range []string{"write", "edit", "patch", "task"} {
+		if seen[denied] {
+			t.Fatalf("expected %s to be filtered out by policy deny", denied)
+		}
+	}
+}
+
+func TestRecoverToolCallsFromContent_TaggedFunction(t *testing.T) {
+	content := "I will run a command.\n<tool_call>\n<function=bash>\n<parameter=command>\nuname\n</parameter>\n</function>\n</tool_call>"
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	calls, cleaned := recoverToolCallsFromContent(content, defs)
+	if len(calls) != 1 {
+		t.Fatalf("recovered calls=%d, want 1", len(calls))
+	}
+	if calls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool name: %+v", calls[0])
+	}
+	if calls[0].Function.Arguments != `{"command":"uname"}` {
+		t.Fatalf("unexpected args: %s", calls[0].Function.Arguments)
+	}
+	if strings.Contains(cleaned, "<tool_call>") {
+		t.Fatalf("expected cleaned content without tool_call block, got %q", cleaned)
+	}
+}
+
+func TestRecoverToolCallsFromContent_JSONStyle(t *testing.T) {
+	content := "<tool_call>{\"name\":\"bash\",\"arguments\":{\"command\":\"uname -a\"}}</tool_call>"
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	calls, cleaned := recoverToolCallsFromContent(content, defs)
+	if len(calls) != 1 {
+		t.Fatalf("recovered calls=%d, want 1", len(calls))
+	}
+	if calls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool name: %+v", calls[0])
+	}
+	if calls[0].Function.Arguments != `{"command":"uname -a"}` {
+		t.Fatalf("unexpected args: %s", calls[0].Function.Arguments)
+	}
+	if cleaned != "" {
+		t.Fatalf("expected empty cleaned content, got %q", cleaned)
+	}
+}
+
+func TestChatWithRetryRecoversTaggedToolCalls(t *testing.T) {
+	prov := &scriptedProvider{
+		model: "demo-model",
+		responses: []provider.ChatResponse{
+			{
+				Content: "<tool_call><function=bash><parameter=command>uname</parameter></function></tool_call>",
+			},
+		},
+	}
+	orch := New(prov, tools.NewRegistry(), Options{})
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	resp, err := orch.chatWithRetry(context.Background(), nil, defs, nil, nil)
+	if err != nil {
+		t.Fatalf("chatWithRetry failed: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected recovered tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool call: %+v", resp.ToolCalls[0])
+	}
+}
+
 func TestTodoStatusMarker(t *testing.T) {
 	if todoStatusMarker("completed") != "[x]" {
 		t.Fatalf("completed: %q", todoStatusMarker("completed"))
@@ -771,7 +951,7 @@ func TestSessionIDAccessors(t *testing.T) {
 func TestModeAccessors(t *testing.T) {
 	orch := New(nil, tools.NewRegistry(), Options{})
 
-	if got := orch.CurrentMode(); got != "default" {
+	if got := orch.CurrentMode(); got != "build" {
 		t.Fatalf("default mode=%q", got)
 	}
 
@@ -780,15 +960,67 @@ func TestModeAccessors(t *testing.T) {
 		t.Fatalf("after SetMode(plan) got %q", got)
 	}
 
-	orch.SetMode("  auto-edit ")
-	if got := orch.CurrentMode(); got != "auto-edit" {
-		t.Fatalf("after SetMode(auto-edit) got %q", got)
+	orch.SetMode("  build ")
+	if got := orch.CurrentMode(); got != "build" {
+		t.Fatalf("after SetMode(build) got %q", got)
 	}
 
 	// invalid mode should be ignored and keep previous value
 	orch.SetMode("invalid-mode")
-	if got := orch.CurrentMode(); got != "auto-edit" {
+	if got := orch.CurrentMode(); got != "build" {
 		t.Fatalf("invalid mode should not change value, got %q", got)
+	}
+}
+
+func TestSlashModeAndPermissionsSync(t *testing.T) {
+	pol := permission.New(config.PermissionConfig{
+		Default: "ask",
+		Bash:    map[string]string{"*": "ask"},
+	})
+	orch := New(nil, tools.NewRegistry(), Options{
+		Policy: pol,
+	})
+
+	got, err := orch.RunInput(context.Background(), "/mode plan", nil)
+	if err != nil {
+		t.Fatalf("mode plan failed: %v", err)
+	}
+	if !strings.Contains(got, "Mode set to plan") {
+		t.Fatalf("unexpected /mode output: %q", got)
+	}
+	if orch.ActiveAgent().Name != "plan" {
+		t.Fatalf("active agent=%q, want plan", orch.ActiveAgent().Name)
+	}
+	if decision := orch.policy.Decide("bash", json.RawMessage(`{"command":"git add ."}`)).Decision; decision != permission.DecisionAsk {
+		t.Fatalf("plan preset should require approval for non-whitelisted bash command, got %s", decision)
+	}
+
+	got, err = orch.RunInput(context.Background(), "/permissions build", nil)
+	if err != nil {
+		t.Fatalf("permissions build failed: %v", err)
+	}
+	if !strings.Contains(got, "Permissions set to preset: build") {
+		t.Fatalf("unexpected /permissions output: %q", got)
+	}
+	if orch.CurrentMode() != "build" {
+		t.Fatalf("mode=%q, want build", orch.CurrentMode())
+	}
+	if orch.ActiveAgent().Name != "build" {
+		t.Fatalf("active agent=%q, want build", orch.ActiveAgent().Name)
+	}
+}
+
+func TestModeControlsTodoWriteAvailability(t *testing.T) {
+	orch := New(nil, tools.NewRegistry(), Options{})
+	if orch.CurrentMode() != "build" {
+		t.Fatalf("mode=%q", orch.CurrentMode())
+	}
+	if orch.isToolAllowed("todowrite") {
+		t.Fatal("build mode should disable todowrite")
+	}
+	orch.SetMode("plan")
+	if !orch.isToolAllowed("todowrite") {
+		t.Fatal("plan mode should allow todowrite")
 	}
 }
 
@@ -866,18 +1098,6 @@ func TestIsCoderConfigPath(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("isCoderConfigPath(%q) = %v, want %v", tc.path, got, tc.want)
 		}
-	}
-}
-
-func TestContainsAnyFold(t *testing.T) {
-	if !containsAnyFold("Hello World", []string{"world"}) {
-		t.Fatalf("expected true for case-insensitive match")
-	}
-	if containsAnyFold("abc", nil) {
-		t.Fatalf("expected false when needles empty")
-	}
-	if containsAnyFold("", []string{"x"}) {
-		t.Fatalf("expected false when source empty")
 	}
 }
 

@@ -20,8 +20,8 @@ type TextChunkFunc = func(chunk string)
 // done=false 表示工具开始，done=true 表示工具结束。
 type ToolEventFunc = func(name, summary string, done bool)
 
-// OnTodoUpdate 待办列表更新回调（todoread/todowrite/ensureSessionTodos 后推送；TUI 侧栏 / REPL 可 no-op）
-// OnTodoUpdate is called after todoread/todowrite/ensureSessionTodos; TUI sidebar or REPL may no-op.
+// OnTodoUpdate 待办列表更新回调（todoread/todowrite 后推送；TUI 侧栏 / REPL 可 no-op）
+// OnTodoUpdate is called after todoread/todowrite; TUI sidebar or REPL may no-op.
 type OnTodoUpdate = func(items []string)
 
 // OnContextUpdate 上下文 token 使用更新回调（步进后推送；REPL 用于提示符第一行，TUI 用于侧栏）
