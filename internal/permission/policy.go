@@ -255,7 +255,7 @@ func PresetConfig(name string) (config.PermissionConfig, bool) {
 			LSPDiagnostics: "allow", LSPDefinition: "allow", LSPHover: "allow",
 			TodoRead: "allow", TodoWrite: "allow", Skill: "ask", Task: "ask", Fetch: "ask",
 			ExternalDir: "ask",
-			Bash: map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow", "pnpm test*": "allow", "yarn test*": "allow"},
+			Bash:        map[string]string{"*": "ask", "ls *": "allow", "cat *": "allow", "grep *": "allow", "go test *": "allow", "pytest*": "allow", "npm test*": "allow", "pnpm test*": "allow", "yarn test*": "allow"},
 		}, true
 	case "plan":
 		return config.PermissionConfig{
