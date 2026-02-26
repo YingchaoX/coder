@@ -37,7 +37,9 @@ func recoverToolCallsFromContent(content string, defs []chat.ToolDef) ([]chat.To
 
 	matches := toolCallBlockPattern.FindAllStringSubmatchIndex(content, -1)
 	if len(matches) == 0 {
-		return nil, content
+		// 一些模型（例如部分 Qwen 兼容服务）可能只输出裸露的 <function=...> 标签，
+		// 而不会包在 <tool_call>...</tool_call> 块里。为保持兼容性，这里做一次降级恢复。
+		return recoverBareFunctionCallsFromContent(content, allowed)
 	}
 
 	calls := make([]chat.ToolCall, 0, len(matches))
@@ -108,6 +110,45 @@ func parseJSONStyleToolCall(inner string, allowed map[string]struct{}, seq int) 
 			Arguments: args,
 		},
 	}, true
+}
+
+// recoverBareFunctionCallsFromContent 处理没有显式 <tool_call> 包裹的 <function=...> 块。
+// 例如：
+// <function=bash>
+// <parameter=command>
+// uname -s
+// </parameter>
+// </function>
+func recoverBareFunctionCallsFromContent(content string, allowed map[string]struct{}) ([]chat.ToolCall, string) {
+	matches := functionCallPattern.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return nil, content
+	}
+
+	calls := make([]chat.ToolCall, 0, len(matches))
+	var cleaned strings.Builder
+	last := 0
+
+	for i, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		start, end := m[0], m[1]
+		// 保留前面的普通文本
+		cleaned.WriteString(content[last:start])
+		last = end
+
+		snippet := strings.TrimSpace(content[start:end])
+		call, ok := parseTaggedFunctionToolCall(snippet, allowed, i+1)
+		if !ok {
+			// 无法解析时保留原始片段，避免丢信息
+			cleaned.WriteString(content[start:end])
+			continue
+		}
+		calls = append(calls, call)
+	}
+	cleaned.WriteString(content[last:])
+	return calls, strings.TrimSpace(cleaned.String())
 }
 
 func parseTaggedFunctionToolCall(inner string, allowed map[string]struct{}, seq int) (chat.ToolCall, bool) {
