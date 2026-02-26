@@ -856,6 +856,26 @@ func TestRecoverToolCallsFromContent_TaggedFunction(t *testing.T) {
 	}
 }
 
+func TestRecoverToolCallsFromContent_BareTaggedFunction(t *testing.T) {
+	content := "I'll help you install Python.\n<function=bash>\n<parameter=command>\nuname -s\n</parameter>\n</function>\n</tool_call>"
+	defs := []chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "bash", Parameters: map[string]any{"type": "object"}}},
+	}
+	calls, cleaned := recoverToolCallsFromContent(content, defs)
+	if len(calls) != 1 {
+		t.Fatalf("recovered calls=%d, want 1", len(calls))
+	}
+	if calls[0].Function.Name != "bash" {
+		t.Fatalf("unexpected tool name: %+v", calls[0])
+	}
+	if calls[0].Function.Arguments != `{"command":"uname -s"}` {
+		t.Fatalf("unexpected args: %s", calls[0].Function.Arguments)
+	}
+	if strings.Contains(cleaned, "<function=bash>") {
+		t.Fatalf("expected cleaned content without function block, got %q", cleaned)
+	}
+}
+
 func TestRecoverToolCallsFromContent_JSONStyle(t *testing.T) {
 	content := "<tool_call>{\"name\":\"bash\",\"arguments\":{\"command\":\"uname -a\"}}</tool_call>"
 	defs := []chat.ToolDef{
