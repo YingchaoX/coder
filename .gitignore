@@ -22,3 +22,6 @@ agent.config.json
 .coder/
 .cursor/
 
+# Submodules (not used)
+opencode/
+
