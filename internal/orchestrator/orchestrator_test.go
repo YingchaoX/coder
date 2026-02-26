@@ -1285,3 +1285,63 @@ func TestFlushSessionToFileWritesPerSessionJSON(t *testing.T) {
 		t.Fatalf("expected 6 messages after second flush, got %d", len(sf2.Messages))
 	}
 }
+
+// TestAgentToolFiltering verifies that tool definitions are properly filtered
+// based on agent mode (build vs plan) following the opencode approach.
+// Tools are filtered out from LLM-visible list at request time, not at registration.
+func TestAgentToolFiltering(t *testing.T) {
+	// Create registry with all tools including question
+	registry := tools.NewRegistry(
+		mockTool{name: "read"},
+		mockTool{name: "edit"},
+		mockTool{name: "question"},
+		mockTool{name: "task"},
+	)
+
+	// Test build mode: should filter out question
+	buildAgent := agent.Resolve("build", config.AgentConfig{})
+	if buildAgent.ToolEnabled["question"] {
+		t.Fatal("build agent should have question disabled")
+	}
+	buildDefs := registry.DefinitionsFiltered(buildAgent.ToolEnabled)
+	for _, def := range buildDefs {
+		if def.Function.Name == "question" {
+			t.Fatal("question tool should be filtered out in build mode")
+		}
+	}
+
+	// Test plan mode: should keep question but filter out edit/task
+	planAgent := agent.Resolve("plan", config.AgentConfig{})
+	if !planAgent.ToolEnabled["question"] {
+		t.Fatal("plan agent should have question enabled")
+	}
+	if planAgent.ToolEnabled["edit"] {
+		t.Fatal("plan agent should have edit disabled")
+	}
+	if planAgent.ToolEnabled["task"] {
+		t.Fatal("plan agent should have task disabled")
+	}
+	planDefs := registry.DefinitionsFiltered(planAgent.ToolEnabled)
+	hasQuestion := false
+	hasEdit := false
+	hasTask := false
+	for _, def := range planDefs {
+		switch def.Function.Name {
+		case "question":
+			hasQuestion = true
+		case "edit":
+			hasEdit = true
+		case "task":
+			hasTask = true
+		}
+	}
+	if !hasQuestion {
+		t.Fatal("question tool should be available in plan mode")
+	}
+	if hasEdit {
+		t.Fatal("edit tool should be filtered out in plan mode")
+	}
+	if hasTask {
+		t.Fatal("task tool should be filtered out in plan mode")
+	}
+}

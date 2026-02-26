@@ -549,4 +549,3 @@ func (c *runtimeController) handleQuestionKey(pi *pendingInteraction, lineInput 
 		return false
 	}
 }
-
