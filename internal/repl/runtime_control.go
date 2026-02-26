@@ -176,6 +176,8 @@ type pendingInteraction struct {
 	question *questionPrompt
 	qIndex   int
 	qAnswers []string
+	utf8Buf  []byte // buffered bytes for incomplete UTF-8 sequence
+	utf8Need int    // remaining bytes to complete current rune
 }
 
 func (c *runtimeController) loop() {
@@ -416,25 +418,47 @@ func (c *runtimeController) printQuestionPrompt(req tools.QuestionRequest, index
 	}
 	q := req.Questions[index]
 	total := len(req.Questions)
+	color := useColor()
 
 	_, _ = fmt.Fprint(c.out, "\r\n")
-	if total > 1 {
-		_, _ = fmt.Fprintf(c.out, "[Question %d/%d] %s\r\n", index+1, total, q.Question)
+	if color {
+		if total > 1 {
+			_, _ = fmt.Fprintf(c.out, "%s%s[Question %d/%d]%s %s\r\n", ansiYellow, ansiBold, index+1, total, ansiReset, q.Question)
+		} else {
+			_, _ = fmt.Fprintf(c.out, "%s%s[Question]%s %s\r\n", ansiYellow, ansiBold, ansiReset, q.Question)
+		}
 	} else {
-		_, _ = fmt.Fprintf(c.out, "[Question] %s\r\n", q.Question)
+		if total > 1 {
+			_, _ = fmt.Fprintf(c.out, "[Question %d/%d] %s\r\n", index+1, total, q.Question)
+		} else {
+			_, _ = fmt.Fprintf(c.out, "[Question] %s\r\n", q.Question)
+		}
 	}
 	for i, opt := range q.Options {
 		label := opt.Label
 		if i == 0 {
 			label += " (Recommended)"
 		}
-		if strings.TrimSpace(opt.Description) != "" {
-			_, _ = fmt.Fprintf(c.out, "  %d. %s — %s\r\n", i+1, label, opt.Description)
+		if color {
+			num := fmt.Sprintf("%s%d.%s", ansiCyan, i+1, ansiReset)
+			if strings.TrimSpace(opt.Description) != "" {
+				_, _ = fmt.Fprintf(c.out, "  %s %s %s— %s%s\r\n", num, label, ansiDim, opt.Description, ansiReset)
+			} else {
+				_, _ = fmt.Fprintf(c.out, "  %s %s\r\n", num, label)
+			}
 		} else {
-			_, _ = fmt.Fprintf(c.out, "  %d. %s\r\n", i+1, label)
+			if strings.TrimSpace(opt.Description) != "" {
+				_, _ = fmt.Fprintf(c.out, "  %d. %s — %s\r\n", i+1, label, opt.Description)
+			} else {
+				_, _ = fmt.Fprintf(c.out, "  %d. %s\r\n", i+1, label)
+			}
 		}
 	}
-	_, _ = fmt.Fprint(c.out, "\r\n> ")
+	if color {
+		_, _ = fmt.Fprintf(c.out, "\r\n%s>%s ", ansiGreen, ansiReset)
+	} else {
+		_, _ = fmt.Fprint(c.out, "\r\n> ")
+	}
 }
 
 func (c *runtimeController) handleQuestionKey(pi *pendingInteraction, lineInput *strings.Builder, b byte) bool {
@@ -455,7 +479,11 @@ func (c *runtimeController) handleQuestionKey(pi *pendingInteraction, lineInput 
 		_, _ = fmt.Fprint(c.out, "\r\n")
 
 		if input == "" {
-			_, _ = fmt.Fprint(c.out, "> ")
+			if useColor() {
+				_, _ = fmt.Fprintf(c.out, "%s>%s ", ansiGreen, ansiReset)
+			} else {
+				_, _ = fmt.Fprint(c.out, "> ")
+			}
 			lineInput.Reset()
 			return false
 		}
@@ -485,11 +513,39 @@ func (c *runtimeController) handleQuestionKey(pi *pendingInteraction, lineInput 
 		}
 		return false
 	default:
-		if b < 0x20 || b > 0x7e {
+		if b < 0x20 {
 			return false
 		}
-		lineInput.WriteByte(b)
-		_, _ = c.out.Write([]byte{b})
+		// printable ASCII
+		if b <= 0x7e {
+			lineInput.WriteByte(b)
+			_, _ = c.out.Write([]byte{b})
+			return false
+		}
+		// UTF-8 multi-byte: lead byte starts a new sequence
+		if b&0xE0 == 0xC0 {
+			pi.utf8Buf = []byte{b}
+			pi.utf8Need = 1
+		} else if b&0xF0 == 0xE0 {
+			pi.utf8Buf = []byte{b}
+			pi.utf8Need = 2
+		} else if b&0xF8 == 0xF0 {
+			pi.utf8Buf = []byte{b}
+			pi.utf8Need = 3
+		} else if b&0xC0 == 0x80 && pi.utf8Need > 0 {
+			// continuation byte
+			pi.utf8Buf = append(pi.utf8Buf, b)
+			pi.utf8Need--
+			if pi.utf8Need == 0 {
+				lineInput.Write(pi.utf8Buf)
+				_, _ = c.out.Write(pi.utf8Buf)
+				pi.utf8Buf = nil
+			}
+		} else {
+			// unexpected byte, discard buffer
+			pi.utf8Buf = nil
+			pi.utf8Need = 0
+		}
 		return false
 	}
 }

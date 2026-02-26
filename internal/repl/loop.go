@@ -22,6 +22,8 @@ const (
 	ansiDim    = "\x1b[90m"
 	ansiGreen  = "\x1b[32m"
 	ansiYellow = "\x1b[33m"
+	ansiCyan   = "\x1b[36m"
+	ansiBold   = "\x1b[1m"
 )
 
 // Loop holds REPL state: orchestrator, prompt info, and input history.
