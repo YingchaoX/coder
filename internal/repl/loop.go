@@ -12,6 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"coder/internal/bootstrap"
+	"coder/internal/config"
 	"coder/internal/orchestrator"
 	"coder/internal/tools"
 )
@@ -158,7 +159,7 @@ func (loop *Loop) updatePromptState(orch *orchestrator.Orchestrator) {
 		loop.tokens = stats.EstimatedTokens
 		loop.limit = stats.ContextLimit
 		if loop.limit <= 0 {
-			loop.limit = 24000
+			loop.limit = config.DefaultRuntimeContextTokenLimit
 		}
 	}
 }

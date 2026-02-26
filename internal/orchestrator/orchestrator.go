@@ -50,20 +50,20 @@ type Orchestrator struct {
 func New(providerClient provider.Provider, registry *tools.Registry, opts Options) *Orchestrator {
 	maxSteps := opts.MaxSteps
 	if maxSteps <= 0 {
-		maxSteps = 128
+		maxSteps = config.DefaultRuntimeMaxSteps
 	}
 	contextLimit := opts.ContextTokenLimit
 	if contextLimit <= 0 {
-		contextLimit = 24000
+		contextLimit = config.DefaultRuntimeContextTokenLimit
 	}
 	if opts.Compaction.Threshold <= 0 || opts.Compaction.Threshold >= 1 {
-		opts.Compaction.Threshold = 0.8
+		opts.Compaction.Threshold = config.DefaultCompactionThreshold
 	}
 	if opts.Compaction.RecentMessages <= 0 {
-		opts.Compaction.RecentMessages = 12
+		opts.Compaction.RecentMessages = config.DefaultCompactionRecentMessages
 	}
 	if opts.Workflow.MaxVerifyAttempts <= 0 {
-		opts.Workflow.MaxVerifyAttempts = 2
+		opts.Workflow.MaxVerifyAttempts = config.DefaultWorkflowMaxVerifyAttempts
 	}
 
 	activeAgent := opts.ActiveAgent

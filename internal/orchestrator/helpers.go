@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"coder/internal/chat"
+	"coder/internal/config"
 )
 
 func (o *Orchestrator) resolveMaxSteps() int {
@@ -16,7 +17,7 @@ func (o *Orchestrator) resolveMaxSteps() int {
 		return o.activeAgent.MaxSteps
 	}
 	if o.maxSteps <= 0 {
-		return 128
+		return config.DefaultRuntimeMaxSteps
 	}
 	return o.maxSteps
 }

@@ -154,6 +154,38 @@ func TestRenderToolResultMultiline(t *testing.T) {
 	}
 }
 
+func TestJoinApprovalReasons(t *testing.T) {
+	tests := []struct {
+		name    string
+		reasons []string
+		want    string
+	}{
+		{
+			name:    "empty reasons",
+			reasons: nil,
+			want:    "approval required",
+		},
+		{
+			name:    "trim and deduplicate",
+			reasons: []string{" policy requires approval ", "dangerous command", "policy requires approval"},
+			want:    "policy requires approval; dangerous command",
+		},
+		{
+			name:    "all blanks",
+			reasons: []string{"  ", "\t"},
+			want:    "approval required",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := joinApprovalReasons(tc.reasons)
+			if got != tc.want {
+				t.Fatalf("joinApprovalReasons() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderToolResultDiffColorized(t *testing.T) {
 	t.Setenv("TERM", "xterm-256color")
 	t.Setenv("NO_COLOR", "")
