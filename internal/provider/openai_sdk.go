@@ -538,7 +538,7 @@ func convertMessages(messages []chat.Message) []openai.ChatCompletionMessage {
 		var msg openai.ChatCompletionMessage
 
 		// Check if message has multi-modal content
-		if m.MultiContent != nil && len(m.MultiContent) > 0 {
+		if len(m.MultiContent) > 0 {
 			// Multi-modal message - create a JSON representation that's compatible
 			// Since ChatCompletionMessage.Content expects a string, we'll combine text and image content
 			var combinedContent strings.Builder
@@ -553,7 +553,7 @@ func convertMessages(messages []chat.Message) []openai.ChatCompletionMessage {
 					combinedContent.WriteString(v.Text)
 				case chat.ImageContent:
 					// For images, we'll add a placeholder indicating the image URL
-					combinedContent.WriteString(fmt.Sprintf("[Image: %s]", v.ImageURL.URL))
+					fmt.Fprintf(&combinedContent, "[Image: %s]", v.ImageURL.URL)
 				}
 			}
 

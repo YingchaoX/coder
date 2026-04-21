@@ -21,7 +21,8 @@ func TestFetchTool_Execute(t *testing.T) {
 
 	// Create a test server that returns a simple HTML page
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/test-image" {
+		switch r.URL.Path {
+		case "/test-image":
 			// Return a small PNG image (1x1 transparent pixel)
 			imgData := []byte{
 				0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG signature
@@ -32,11 +33,11 @@ func TestFetchTool_Execute(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "image/png")
 			w.Write(imgData)
-		} else if r.URL.Path == "/test-html" {
+		case "/test-html":
 			// Return HTML content
 			w.Header().Set("Content-Type", "text/html")
 			w.Write([]byte("<html><body><h1>Test Page</h1></body></html>"))
-		} else if r.URL.Path == "/test-large-text" {
+		case "/test-large-text":
 			// Return large plain text content (> 100KB but < 5MB)
 			w.Header().Set("Content-Type", "text/plain")
 			large := make([]byte, 150*1024)
@@ -44,15 +45,17 @@ func TestFetchTool_Execute(t *testing.T) {
 				large[i] = 'a'
 			}
 			w.Write(large)
-		} else if r.URL.Path == "/test-pdf" {
+		case "/test-pdf":
 			// Return a small fake PDF payload; contents don't need to be a valid PDF because
 			// fetch only inspects headers and size, and does not attempt to parse PDF bytes.
 			w.Header().Set("Content-Type", "application/pdf")
 			w.Write([]byte("%PDF-1.7\n%fake\n"))
-		} else if r.URL.Path == "/test-binary" {
+		case "/test-binary":
 			// Return generic binary content.
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Write([]byte{0, 1, 2, 3, 4, 5})
+		default:
+			http.NotFound(w, r)
 		}
 	}))
 	defer ts.Close()

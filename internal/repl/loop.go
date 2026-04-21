@@ -275,7 +275,6 @@ func readInputRaw(stdinFd int, stdin *os.File, out io.Writer, history []string) 
 			}
 		case '\r', '\n':
 			if pastePending {
-				pastePending = false
 				// Ensure the next output starts at column 0 on a new line.
 				// 使用 \r\n 保证光标回到行首并换到下一行，避免 [TOOL] 等输出缩进错位。
 				_, _ = out.Write([]byte("\r\n"))

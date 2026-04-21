@@ -1,7 +1,8 @@
-.PHONY: build test lint coverage clean all fmt vet
+.PHONY: build test lint coverage clean all fmt vet golangci-lint
 
 BINARY = bin/agent
 GOFLAGS = -v
+GOLANGCI_LINT ?= golangci-lint
 
 # 默认目标 / Default target
 all: lint test build
@@ -40,8 +41,16 @@ fmt:
 vet:
 	go vet ./...
 
-# Lint (fmt + vet)
-lint: fmt vet
+# golangci-lint
+golangci-lint:
+	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { \
+		echo "golangci-lint not found. Install the version in .golangci-lint-version first."; \
+		exit 1; \
+	}
+	$(GOLANGCI_LINT) run
+
+# Lint (fmt + vet + golangci-lint)
+lint: fmt vet golangci-lint
 
 # 清理 / Clean
 clean:

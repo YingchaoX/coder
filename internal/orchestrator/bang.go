@@ -159,7 +159,7 @@ func formatBangCommandResult(command, rawResult string) string {
 	b.WriteString("$ ")
 	b.WriteString(command)
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("exit=%d duration=%dms", exitCode, duration))
+	fmt.Fprintf(&b, "exit=%d duration=%dms", exitCode, duration)
 	if truncated {
 		b.WriteString(" (truncated)")
 	}
