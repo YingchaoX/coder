@@ -257,16 +257,33 @@ func summarizeToolResult(name string, rawResult string) string {
 		duration := getInt(result, "duration_ms", 0)
 		stdout := strings.TrimSpace(getString(result, "stdout", ""))
 		stderr := strings.TrimSpace(getString(result, "stderr", ""))
+		logPath := strings.TrimSpace(getString(result, "log_path", ""))
 		if exitCode == 0 {
 			if stdout != "" {
-				return fmt.Sprintf("exit=0 in %dms, stdout=%s", duration, summarizeForLog(firstLine(stdout)))
+				line := fmt.Sprintf("exit=0 in %dms, stdout=%s", duration, summarizeForLog(firstLine(stdout)))
+				if logPath != "" {
+					line += ", log=" + logPath
+				}
+				return line
 			}
-			return fmt.Sprintf("exit=0 in %dms", duration)
+			line := fmt.Sprintf("exit=0 in %dms", duration)
+			if logPath != "" {
+				line += ", log=" + logPath
+			}
+			return line
 		}
 		if stderr != "" {
-			return fmt.Sprintf("exit=%d in %dms, stderr=%s", exitCode, duration, summarizeForLog(firstLine(stderr)))
+			line := fmt.Sprintf("exit=%d in %dms, stderr=%s", exitCode, duration, summarizeForLog(firstLine(stderr)))
+			if logPath != "" {
+				line += ", log=" + logPath
+			}
+			return line
 		}
-		return fmt.Sprintf("exit=%d in %dms", exitCode, duration)
+		line := fmt.Sprintf("exit=%d in %dms", exitCode, duration)
+		if logPath != "" {
+			line += ", log=" + logPath
+		}
+		return line
 	default:
 		if errText := getString(result, "error", ""); errText != "" {
 			return summarizeForLog(errText)

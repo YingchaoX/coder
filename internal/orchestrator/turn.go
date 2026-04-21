@@ -17,6 +17,9 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 	undoRecorder := newTurnUndoRecorder(o.workspaceRoot)
 	defer o.commitTurnUndo(undoRecorder)
 
+	baseToolDefs := o.resolveToolDefsForInput(userInput)
+	o.turnToolDefs = append([]chat.ToolDef(nil), baseToolDefs...)
+
 	o.appendMessage(chat.Message{Role: "user", Content: userInput})
 	o.emitContextUpdate()
 	o.refreshTodos(ctx)
@@ -67,12 +70,12 @@ func (o *Orchestrator) RunTurn(ctx context.Context, userInput string, out io.Wri
 			onTextChunk = o.onTextChunk
 		}
 
+		toolDefs := append([]chat.ToolDef(nil), baseToolDefs...)
 		// 对于闲聊/简单问候，不提供工具定义，避免模型过度探索
-		toolDefs := o.filterToolDefsByPolicy(o.registry.DefinitionsFiltered(o.activeAgent.ToolEnabled))
 		if isChattyGreeting(userInput) && step == 0 {
 			toolDefs = nil
 		}
-		resp, err := o.chatWithRetry(ctx, o.buildProviderMessages(), toolDefs, onTextChunk, onReasoningChunk)
+		resp, err := o.chatWithRetry(ctx, o.buildProviderMessages(toolDefs), toolDefs, onTextChunk, onReasoningChunk)
 		if err != nil {
 			if streamed {
 				streamRenderer.Finish()
@@ -154,7 +157,7 @@ func (o *Orchestrator) maybeCompact() {
 	if !o.compaction.Auto {
 		return
 	}
-	messages := o.buildProviderMessages()
+	messages := o.buildProviderMessages(o.currentToolDefs())
 	estimated := contextmgr.EstimateTokens(messages)
 	threshold := int(float64(o.contextTokenLimit) * o.compaction.Threshold)
 	if estimated <= threshold {
@@ -170,13 +173,16 @@ func (o *Orchestrator) maybeCompact() {
 	o.lastCompaction = summary
 }
 
-func (o *Orchestrator) buildProviderMessages() []chat.Message {
+func (o *Orchestrator) buildProviderMessages(toolDefs []chat.ToolDef) []chat.Message {
 	out := []chat.Message{}
 	if o.assembler != nil {
 		out = append(out, o.assembler.StaticMessages()...)
 	}
 	if modeMsg := o.runtimeModeSystemMessage(); strings.TrimSpace(modeMsg.Content) != "" {
 		out = append(out, modeMsg)
+	}
+	if toolMsg := o.runtimeToolsSystemMessage(toolDefs); strings.TrimSpace(toolMsg.Content) != "" {
+		out = append(out, toolMsg)
 	}
 	out = append(out, o.messages...)
 	return out
@@ -190,12 +196,11 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 			Content: "[RUNTIME_MODE]\n" +
 				"Current mode is PLAN.\n" +
 				"- Prioritize read-only analysis and planning.\n" +
-				"- You may read/analyze code, use fetch for web access, manage todos when helpful, and run read-only diagnostic bash commands when needed.\n" +
-				"- Plans can be provided directly in natural-language responses; todos are optional planning aids.\n" +
-				"- For environment/setup requests (install/uninstall/configure software), ask clarifying questions first and use minimal diagnostics only when necessary.\n" +
-				"- Do NOT perform repository mutations yourself (no edit/write/patch/delete, no commit/stage operations, no subagent task delegation).\n" +
-				"- If user asks for implementation, provide an actionable plan and required changes.\n" +
-				"- Use the `question` tool to ask clarifying questions when user intent is ambiguous or you need preferences before planning. Present the recommended option first.",
+				"- Use only the tools exposed in [RUNTIME_TOOLS].\n" +
+				"- For environment/setup requests, ask for missing details first and use minimal diagnostics.\n" +
+				"- If the user asks to create, modify, delete, install, or run a mutating command, do NOT execute it in PLAN mode. Respond with a concise plan or next steps instead.\n" +
+				"- If bash is exposed in this turn, treat it as read-only diagnostics only (for example: pwd, ls, cat, grep, git status, git diff). Do not use bash for mutations in PLAN mode.\n" +
+				"- Do NOT perform repository mutations yourself unless a writable tool is explicitly exposed in this turn.",
 		}
 	default:
 		return chat.Message{
@@ -203,8 +208,58 @@ func (o *Orchestrator) runtimeModeSystemMessage() chat.Message {
 			Content: "[RUNTIME_MODE]\n" +
 				"Current mode is BUILD.\n" +
 				"- Focus on implementing and validating changes.\n" +
-				"- Do NOT create or update todos in this mode (todowrite is plan-only).",
+				"- Use only the tools exposed in [RUNTIME_TOOLS].\n" +
+				"- Prefer small, validated changes over broad refactors.",
 		}
+	}
+}
+
+func (o *Orchestrator) runtimeToolsSystemMessage(toolDefs []chat.ToolDef) chat.Message {
+	if len(toolDefs) == 0 {
+		return chat.Message{}
+	}
+
+	names := make([]string, 0, len(toolDefs))
+	has := map[string]bool{}
+	for _, def := range toolDefs {
+		name := strings.TrimSpace(def.Function.Name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+		has[name] = true
+	}
+	if len(names) == 0 {
+		return chat.Message{}
+	}
+
+	lines := []string{
+		"[RUNTIME_TOOLS]",
+		"Only the following tools are exposed in this turn: " + strings.Join(names, ", "),
+		"- Prefer read/list/grep for focused discovery. Avoid broad repository scans unless necessary.",
+	}
+
+	if has["edit"] {
+		lines = append(lines, "- Prefer edit for localized changes. Use write mainly for new files or full replacements.")
+	}
+	if has["patch"] {
+		lines = append(lines, "- Use patch only when a localized edit cannot be expressed safely with edit/write. Keep hunks minimal.")
+	}
+	if has["fetch"] {
+		lines = append(lines, "- fetch may be used for HTTP/HTTPS access to internal services and documentation reachable from this environment.")
+	}
+	if has["todowrite"] {
+		lines = append(lines, "- Todos are optional. Use them only for genuinely multi-step work, and keep at most one item in_progress.")
+	} else {
+		lines = append(lines, "- Do not create or update todos unless todowrite is exposed in this turn.")
+	}
+	if has["question"] {
+		lines = append(lines, "- Use question only when a missing user preference would materially affect the plan.")
+	}
+
+	return chat.Message{
+		Role:    "system",
+		Content: strings.Join(lines, "\n"),
 	}
 }
 
@@ -235,7 +290,7 @@ func (o *Orchestrator) emitContextUpdate() {
 	if o.onContextUpdate == nil {
 		return
 	}
-	messages := o.buildProviderMessages()
+	messages := o.buildProviderMessages(o.currentToolDefs())
 	estimated := contextmgr.EstimateTokens(messages)
 	limit := o.contextTokenLimit
 	if limit <= 0 {

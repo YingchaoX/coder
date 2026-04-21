@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"coder/internal/chat"
@@ -97,14 +98,34 @@ func (t *BashTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 
 	cmd := exec.CommandContext(execCtx, "/bin/sh", "-lc", in.Command)
 	cmd.Dir = t.workspaceRoot
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("stderr pipe: %w", err)
+	}
 
 	stdout := newCappedBuffer(t.outputLimitBytes)
 	stderr := newCappedBuffer(t.outputLimitBytes)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	streamer, _ := CommandStreamerFromContext(ctx)
+	if streamer != nil {
+		streamer.OnCommandStart(t.Name(), in.Command)
+	}
 
 	start := time.Now()
-	err = cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start bash command: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go streamCommandOutput(stdoutPipe, "stdout", stdout, streamer, &wg)
+	go streamCommandOutput(stderrPipe, "stderr", stderr, streamer, &wg)
+
+	err = cmd.Wait()
+	wg.Wait()
 	dur := time.Since(start)
 
 	exitCode := 0
@@ -119,6 +140,9 @@ func (t *BashTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		} else {
 			return "", fmt.Errorf("run bash command: %w", err)
 		}
+	}
+	if streamer != nil {
+		streamer.OnCommandFinish(t.Name(), exitCode, dur.Milliseconds())
 	}
 
 	return mustJSON(map[string]any{
@@ -142,6 +166,27 @@ func parseBashArgs(args json.RawMessage) (bashArgs, error) {
 		return bashArgs{}, err
 	}
 	return in, nil
+}
+
+func streamCommandOutput(r io.Reader, stream string, buf *cappedBuffer, streamer CommandStreamer, wg *sync.WaitGroup) {
+	defer wg.Done()
+	tmp := make([]byte, 4096)
+	for {
+		n, err := r.Read(tmp)
+		if n > 0 {
+			chunk := string(tmp[:n])
+			_, _ = buf.Write(tmp[:n])
+			if streamer != nil {
+				streamer.OnCommandChunk("bash", stream, chunk)
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			return
+		}
+	}
 }
 
 func extractExistingRedirectTarget(command, workspaceRoot string) string {
