@@ -41,11 +41,11 @@ func exists(path string) bool {
 func (o *Orchestrator) runAutoVerify(ctx context.Context, command string, attempt int, out io.Writer) (bool, bool, error) {
 	args := mustJSON(map[string]string{"command": command})
 	rawArgs := json.RawMessage(args)
+	callID := fmt.Sprintf("auto_verify_%d", attempt)
 	if out != nil {
 		renderToolStart(out, fmt.Sprintf("* Auto verify (attempt %d) %s", attempt, quoteOrDash(command)))
 	}
-	result, err := o.registry.Execute(ctx, "bash", rawArgs)
-	callID := fmt.Sprintf("auto_verify_%d", attempt)
+	result, err := o.executeToolWithRuntime(ctx, "bash", rawArgs, out, callID)
 	if err != nil {
 		if out != nil {
 			renderToolError(out, summarizeForLog(err.Error()))
@@ -56,6 +56,7 @@ func (o *Orchestrator) runAutoVerify(ctx context.Context, command string, attemp
 		renderToolResult(out, summarizeToolResult("bash", result))
 	}
 	o.appendSyntheticToolExchange("bash", args, result, callID)
+	o.checkpointSession(ctx)
 	parsed := parseJSONObject(result)
 	if getInt(parsed, "exit_code", 1) == 0 {
 		return true, false, nil

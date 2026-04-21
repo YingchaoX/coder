@@ -24,6 +24,7 @@ const (
 	ansiGreen  = "\x1b[32m"
 	ansiYellow = "\x1b[33m"
 	ansiCyan   = "\x1b[36m"
+	ansiBlue   = "\x1b[34m"
 	ansiBold   = "\x1b[1m"
 )
 
@@ -186,11 +187,20 @@ func (loop *Loop) printPromptTo(w io.Writer) {
 		_, _ = fmt.Fprintln(w, line1)
 	}
 	// Line 2: [mode] /path>
-	line2 := fmt.Sprintf("[%s] %s> ", mode, cwd)
 	if useColor() {
-		_, _ = fmt.Fprintf(w, "%s%s%s", ansiGreen, line2, ansiReset)
+		_, _ = fmt.Fprintf(w, "%s[%s]%s %s%s>%s ", promptModeColor(mode), mode, ansiReset, ansiGreen, cwd, ansiReset)
 	} else {
+		line2 := fmt.Sprintf("[%s] %s> ", mode, cwd)
 		_, _ = fmt.Fprint(w, line2)
+	}
+}
+
+func promptModeColor(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "plan":
+		return ansiBlue
+	default:
+		return ansiGreen
 	}
 }
 

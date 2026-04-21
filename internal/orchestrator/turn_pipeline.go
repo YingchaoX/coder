@@ -81,6 +81,7 @@ func (o *Orchestrator) executeToolCalls(
 				renderToolBlocked(out, reason)
 			}
 			o.appendToolDenied(call, reason)
+			o.checkpointSession(ctx)
 			continue
 		}
 
@@ -98,6 +99,7 @@ func (o *Orchestrator) executeToolCalls(
 				renderToolBlocked(out, summarizeForLog(reason))
 			}
 			o.appendToolDenied(call, reason)
+			o.checkpointSession(ctx)
 			continue
 		}
 
@@ -107,6 +109,7 @@ func (o *Orchestrator) executeToolCalls(
 				renderToolError(out, summarizeForLog(err.Error()))
 			}
 			o.appendToolError(call, fmt.Errorf("approval check: %w", err))
+			o.checkpointSession(ctx)
 			continue
 		}
 		needsApproval := decision.Decision == permission.DecisionAsk || approvalReq != nil
@@ -128,6 +131,7 @@ func (o *Orchestrator) executeToolCalls(
 					renderToolBlocked(out, "approval callback unavailable")
 				}
 				o.appendToolDenied(call, "approval callback unavailable")
+				o.checkpointSession(ctx)
 				continue
 			}
 			allowed, err := o.onApproval(ctx, tools.ApprovalRequest{
@@ -149,6 +153,7 @@ func (o *Orchestrator) executeToolCalls(
 					renderToolBlocked(out, summarizeForLog(approvalReason))
 				}
 				o.appendToolDenied(call, approvalReason)
+				o.checkpointSession(ctx)
 				continue
 			}
 		}
@@ -157,7 +162,7 @@ func (o *Orchestrator) executeToolCalls(
 			undoRecorder.CaptureFromToolCall(call.Function.Name, args)
 		}
 
-		result, err := o.registry.Execute(ctx, call.Function.Name, args)
+		result, err := o.executeToolWithRuntime(ctx, call.Function.Name, args, out, call.ID)
 		if err != nil {
 			if isContextCancellationErr(ctx, err) {
 				return contextErrOr(ctx, err)
@@ -166,6 +171,7 @@ func (o *Orchestrator) executeToolCalls(
 				renderToolError(out, summarizeForLog(err.Error()))
 			}
 			o.appendToolError(call, err)
+			o.checkpointSession(ctx)
 			continue
 		}
 		resultSummary := summarizeToolResult(call.Function.Name, result)
@@ -181,6 +187,7 @@ func (o *Orchestrator) executeToolCalls(
 			ToolCallID: call.ID,
 			Content:    result,
 		})
+		o.checkpointSession(ctx)
 		if call.Function.Name == "todoread" || call.Function.Name == "todowrite" {
 			if o.onTodoUpdate != nil {
 				items := todoItemsFromResult(result)

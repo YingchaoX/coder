@@ -44,6 +44,7 @@ type Orchestrator struct {
 	sessionIDRef      *string       // mutable current session ID
 	configBasePath    string        // for /model persist
 	lastSyncedMsgN    int
+	turnToolDefs      []chat.ToolDef
 	undoStack         []turnUndoEntry
 }
 
@@ -117,6 +118,7 @@ func (o *Orchestrator) Reset() {
 	o.messageTimestamps = o.messageTimestamps[:0]
 	o.lastCompaction = ""
 	o.lastSyncedMsgN = 0
+	o.turnToolDefs = nil
 	o.undoStack = o.undoStack[:0]
 }
 
@@ -181,7 +183,7 @@ func (o *Orchestrator) LastCompactionSummary() string {
 }
 
 func (o *Orchestrator) CurrentContextStats() ContextStats {
-	messages := o.buildProviderMessages()
+	messages := o.buildProviderMessages(o.currentToolDefs())
 	estimated := contextmgr.EstimateTokens(messages)
 	limit := o.contextTokenLimit
 	percent := 0.0
@@ -209,7 +211,10 @@ func (o *Orchestrator) currentToolDefs() []chat.ToolDef {
 	if o == nil || o.registry == nil {
 		return nil
 	}
-	return o.registry.Definitions()
+	if len(o.turnToolDefs) > 0 {
+		return append([]chat.ToolDef(nil), o.turnToolDefs...)
+	}
+	return o.resolveToolDefsForInput("")
 }
 
 func (o *Orchestrator) SetTextStreamCallback(fn TextChunkFunc) {

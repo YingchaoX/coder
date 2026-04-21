@@ -1377,3 +1377,156 @@ func TestAgentToolFiltering(t *testing.T) {
 		t.Fatal("task tool should be filtered out in plan mode")
 	}
 }
+
+func TestResolveToolDefsForInput_MinimalByDefault(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "read"},
+		mockTool{name: "list"},
+		mockTool{name: "grep"},
+		mockTool{name: "edit"},
+		mockTool{name: "write"},
+		mockTool{name: "bash"},
+		mockTool{name: "fetch"},
+		mockTool{name: "patch"},
+		mockTool{name: "task"},
+		mockTool{name: "git_status"},
+		mockTool{name: "question"},
+	)
+	orch := New(&scriptedProvider{model: "test"}, registry, Options{
+		ActiveAgent: agent.Resolve("build", config.AgentConfig{}),
+	})
+	defs := orch.resolveToolDefsForInput("请修复这个函数")
+	seen := map[string]bool{}
+	for _, def := range defs {
+		seen[def.Function.Name] = true
+	}
+	for _, name := range []string{"read", "list", "grep", "edit", "write", "bash"} {
+		if !seen[name] {
+			t.Fatalf("expected core tool %q to be exposed", name)
+		}
+	}
+	for _, name := range []string{"fetch", "patch", "task", "git_status", "question"} {
+		if seen[name] {
+			t.Fatalf("did not expect optional tool %q to be exposed by default", name)
+		}
+	}
+}
+
+func TestResolveToolDefsForInput_ExposesFetchAndPatchOnDemand(t *testing.T) {
+	registry := tools.NewRegistry(
+		mockTool{name: "read"},
+		mockTool{name: "bash"},
+		mockTool{name: "fetch"},
+		mockTool{name: "patch"},
+	)
+	orch := New(&scriptedProvider{model: "test"}, registry, Options{
+		ActiveAgent: agent.Resolve("build", config.AgentConfig{}),
+	})
+	defs := orch.resolveToolDefsForInput("请根据 https://intranet.example/api/docs 修复这个 diff patch")
+	seen := map[string]bool{}
+	for _, def := range defs {
+		seen[def.Function.Name] = true
+	}
+	if !seen["fetch"] {
+		t.Fatal("expected fetch to be exposed for URL/docs request")
+	}
+	if !seen["patch"] {
+		t.Fatal("expected patch to be exposed for diff/patch request")
+	}
+}
+
+func TestRuntimeToolsSystemMessage_OnlyMentionsVisibleRules(t *testing.T) {
+	orch := New(&scriptedProvider{model: "test"}, tools.NewRegistry(mockTool{name: "fetch"}), Options{
+		ActiveAgent: agent.Resolve("build", config.AgentConfig{}),
+	})
+	msg := orch.runtimeToolsSystemMessage([]chat.ToolDef{
+		{Type: "function", Function: chat.ToolFunction{Name: "read", Parameters: map[string]any{"type": "object"}}},
+		{Type: "function", Function: chat.ToolFunction{Name: "fetch", Parameters: map[string]any{"type": "object"}}},
+	})
+	if !strings.Contains(msg.Content, "fetch may be used") {
+		t.Fatalf("expected fetch guidance, got %q", msg.Content)
+	}
+	if strings.Contains(msg.Content, "Use patch only") {
+		t.Fatalf("did not expect patch guidance, got %q", msg.Content)
+	}
+	if !strings.Contains(msg.Content, "Do not create or update todos") {
+		t.Fatalf("expected todo suppression guidance, got %q", msg.Content)
+	}
+}
+
+func TestRuntimeModeSystemMessage_PlanForbidsMutatingExecution(t *testing.T) {
+	orch := New(&scriptedProvider{model: "test"}, tools.NewRegistry(mockTool{name: "bash"}), Options{
+		ActiveAgent: agent.Resolve("plan", config.AgentConfig{}),
+	})
+	orch.SetMode("PLAN")
+
+	msg := orch.runtimeModeSystemMessage()
+	for _, needle := range []string{
+		"do NOT execute it in PLAN mode",
+		"Respond with a concise plan or next steps instead",
+		"treat it as read-only diagnostics only",
+	} {
+		if !strings.Contains(msg.Content, needle) {
+			t.Fatalf("expected %q in plan runtime message, got %q", needle, msg.Content)
+		}
+	}
+}
+
+func TestToolResultCheckpointPersistsMidTurnProgress(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "coder.db")
+	store, err := storage.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	sid := storage.NewSessionID()
+	if err := store.CreateSession(storage.SessionMeta{
+		ID:    sid,
+		Agent: "build",
+		Model: "test",
+		CWD:   root,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	prov := &scriptedProvider{
+		model: "test",
+		responses: []provider.ChatResponse{
+			{
+				ToolCalls: []chat.ToolCall{
+					{
+						ID:   "call_read_1",
+						Type: "function",
+						Function: chat.ToolCallFunction{
+							Name:      "read",
+							Arguments: `{"path":"README.md"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+	registry := tools.NewRegistry(mockTool{name: "read", result: `{"ok":true,"path":"README.md","content":"hello"}`})
+	orch := New(prov, registry, Options{
+		ActiveAgent:   agent.Resolve("build", config.AgentConfig{}),
+		Store:         store,
+		SessionIDRef:  &sid,
+		WorkspaceRoot: root,
+	})
+
+	if _, err := orch.RunTurn(context.Background(), "read the file", nil); err == nil {
+		t.Fatal("expected provider error after scripted tool call")
+	}
+
+	sessionPath := filepath.Join(root, ".coder", "sessions", sid+".json")
+	data, err := os.ReadFile(sessionPath)
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `"role": "tool"`) || !strings.Contains(content, `"name": "read"`) {
+		t.Fatalf("expected tool checkpoint in session file, got %s", content)
+	}
+}

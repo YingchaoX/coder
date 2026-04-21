@@ -124,7 +124,7 @@ func (o *Orchestrator) runBangCommand(ctx context.Context, rawInput, command str
 		renderToolStart(out, formatToolStart("bash", args))
 	}
 
-	result, err := o.registry.Execute(ctx, "bash", rawArgs)
+	result, err := o.executeToolWithRuntime(ctx, "bash", rawArgs, out, "bang")
 	if err != nil {
 		return "", fmt.Errorf("execute command mode: %w", err)
 	}
@@ -162,6 +162,10 @@ func formatBangCommandResult(command, rawResult string) string {
 	b.WriteString(fmt.Sprintf("exit=%d duration=%dms", exitCode, duration))
 	if truncated {
 		b.WriteString(" (truncated)")
+	}
+	if logPath := strings.TrimSpace(getString(result, "log_path", "")); logPath != "" {
+		b.WriteString(" log=")
+		b.WriteString(logPath)
 	}
 	if strings.TrimSpace(stdout) != "" {
 		stdoutLimited, stdoutTruncated := limitOutputLines(stdout, maxBangOutputLines)
