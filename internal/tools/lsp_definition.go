@@ -173,9 +173,7 @@ func (t *LSPDefinitionTool) Execute(ctx context.Context, args json.RawMessage) (
 	for i, loc := range locations {
 		// Convert file:// URI to relative path
 		locPath := loc.URI
-		if strings.HasPrefix(locPath, "file://") {
-			locPath = locPath[7:]
-		}
+		locPath = strings.TrimPrefix(locPath, "file://")
 
 		// Try to make it relative to workspace
 		if rel, err := filepath.Rel(".", locPath); err == nil {

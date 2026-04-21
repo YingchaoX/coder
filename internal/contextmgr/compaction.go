@@ -185,8 +185,8 @@ func buildSummaryInput(messages []chat.Message) string {
 				b.WriteString("\n\n")
 			}
 			for _, tc := range m.ToolCalls {
-				b.WriteString(fmt.Sprintf("Tool call: %s(%s)\n", tc.Function.Name,
-					truncateArgs(tc.Function.Arguments, 100)))
+				fmt.Fprintf(&b, "Tool call: %s(%s)\n", tc.Function.Name,
+					truncateArgs(tc.Function.Arguments, 100))
 			}
 		case "tool":
 			if m.Name != "" {
@@ -194,7 +194,7 @@ func buildSummaryInput(messages []chat.Message) string {
 				if len([]rune(result)) > 200 {
 					result = string([]rune(result)[:200]) + "..."
 				}
-				b.WriteString(fmt.Sprintf("Tool result [%s]: %s\n\n", m.Name, result))
+				fmt.Fprintf(&b, "Tool result [%s]: %s\n\n", m.Name, result)
 			}
 		}
 	}
